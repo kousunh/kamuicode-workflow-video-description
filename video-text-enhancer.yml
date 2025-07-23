@@ -29,6 +29,16 @@ on:
           - '左下'
           - '下'
           - '右下'
+      generate_title_image:
+        description: 'AI背景画像を生成してタイトルに適用する'
+        required: false
+        type: boolean
+        default: true
+      generate_background_music:
+        description: 'AI背景音楽を生成して動画に追加する'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -54,7 +64,7 @@ jobs:
     - name: Create branch name
       id: branch
       run: |
-        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        TIMESTAMP=$(TZ=Asia/Tokyo date +%Y%m%d-%H%M%S)
         BRANCH_NAME="video-edit-$TIMESTAMP"
         FOLDER_NAME="movie-edit-$TIMESTAMP"
         echo "branch-name=$BRANCH_NAME" >> $GITHUB_OUTPUT
@@ -190,20 +200,29 @@ jobs:
           echo "✅ Using custom title: ${{ github.event.inputs.edit_title }}"
         else
           # Geminiでタイトル生成
-          echo '{"prompt": "この動画を分析して、魅力的なタイトルを生成してください。以下のJSON形式で返してください：{\"title\": \"生成されたタイトル（20文字以内）\", \"duration\": 3, \"style\": {\"fontsize\": 72, \"color\": \"white\", \"bgcolor\": \"black@0.8\", \"fontfile\": \"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc\"}}"}' > /tmp/title_prompt.json
+          echo '{"prompt": "この動画を分析して、魅力的なタイトルを生成してください。20文字以内の日本語でタイトルのみを返してください。"}' > /tmp/title_prompt.json
           TITLE_PROMPT=$(jq -r '.prompt' /tmp/title_prompt.json)
           
+          # Geminiからタイトルのみ取得
           python scripts/gemini_analyzer.py \
             "${{ steps.detect-video.outputs.video-path }}" \
-            "$FOLDER_NAME/analysis/title.json" \
+            "$FOLDER_NAME/analysis/title_raw.txt" \
             "$GEMINI_API_KEY" \
-            --prompt "$TITLE_PROMPT" \
-            --format json
+            --prompt "$TITLE_PROMPT"
+          
+          # タイトルを読み込んで固定フォーマットのJSONを作成
+          if [ -f "$FOLDER_NAME/analysis/title_raw.txt" ]; then
+            GENERATED_TITLE=$(cat "$FOLDER_NAME/analysis/title_raw.txt" | head -1)
+            echo "{\"title\": \"$GENERATED_TITLE\", \"duration\": 3, \"style\": {\"fontsize\": 72, \"color\": \"white\", \"bgcolor\": \"black@0.8\", \"fontfile\": \"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc\"}}" | jq . > "$FOLDER_NAME/analysis/title.json"
+          else
+            echo "❌ Failed to generate title"
+            exit 1
+          fi
         fi
         
         # Verify title.json
         if [ -f "$FOLDER_NAME/analysis/title.json" ]; then
-          echo "✅ Title generated successfully"
+          echo "✅ Title generated successfully (duration: 3 seconds)"
           cat "$FOLDER_NAME/analysis/title.json"
         else
           echo "❌ Title generation failed"
@@ -219,11 +238,19 @@ jobs:
         FOLDER_NAME="${{ needs.setup-branch.outputs.folder-name }}"
         TEXT_POSITION="${{ github.event.inputs.text_position }}"
         
-        # テキスト位置の決定
+        # テキスト位置の決定（日本語→英語変換）
         if [ "$TEXT_POSITION" = "auto" ] || [ -z "$TEXT_POSITION" ]; then
           POSITION="top-left"
         else
-          POSITION="$TEXT_POSITION"
+          case "$TEXT_POSITION" in
+            "左上") POSITION="top-left" ;;
+            "上") POSITION="top-center" ;;
+            "右上") POSITION="top-right" ;;
+            "左下") POSITION="bottom-left" ;;
+            "下") POSITION="bottom-center" ;;
+            "右下") POSITION="bottom-right" ;;
+            *) POSITION="$TEXT_POSITION" ;;  # 英語の場合はそのまま使用
+          esac
         fi
         
         # 説明生成プロンプトを作成
@@ -257,7 +284,7 @@ jobs:
         echo "- **Position**: $POSITION" >> "$FOLDER_NAME/analysis/summary.md"
         echo "" >> "$FOLDER_NAME/analysis/summary.md"
         echo "## Analysis Completed" >> "$FOLDER_NAME/analysis/summary.md"
-        echo "- **Date**: $(date)" >> "$FOLDER_NAME/analysis/summary.md"
+        echo "- **Date**: $(TZ=Asia/Tokyo date)" >> "$FOLDER_NAME/analysis/summary.md"
         
         echo "✅ Analysis completed"
           
@@ -321,7 +348,7 @@ jobs:
         if git diff --cached --quiet; then
           echo "No analysis files to commit"
         else
-          git commit -m "📊 Add video analysis results - Video: ${{ steps.detect-video.outputs.video-path }}, Title: ${{ steps.verify.outputs.title }}, Analyzed at: $(date)"
+          git commit -m "📊 Add video analysis results - Video: ${{ steps.detect-video.outputs.video-path }}, Title: ${{ steps.verify.outputs.title }}, Analyzed at: $(TZ=Asia/Tokyo date)"
           git pull --rebase origin "${{ needs.setup-branch.outputs.branch-name }}"
           git push
         fi
@@ -350,7 +377,8 @@ jobs:
         
     - name: Create output directory
       run: |
-        mkdir -p ${{ needs.setup-branch.outputs.folder-name }}/edited-movie
+        mkdir -p ${{ needs.setup-branch.outputs.folder-name }}/work-in-progress
+        mkdir -p ${{ needs.setup-branch.outputs.folder-name }}/final-output
         
     - name: Get video resolution
       id: video-res
@@ -378,7 +406,7 @@ jobs:
         color: ${{ fromJson(steps.read-title.outputs.title-data).style.color }}
         bgcolor: ${{ fromJson(steps.read-title.outputs.title-data).style.bgcolor }}
         fontfile: ${{ env.FONT_FILE }}
-        output-path: ${{ needs.setup-branch.outputs.folder-name }}/edited-movie/title.mp4
+        output-path: ${{ needs.setup-branch.outputs.folder-name }}/work-in-progress/title.mp4
         
     - name: Apply text overlays
       uses: ./modules/ffmpeg-text-overlay
@@ -386,38 +414,38 @@ jobs:
         video-path: ${{ needs.analyze-video.outputs.actual-video-path }}
         descriptions-json: ${{ needs.setup-branch.outputs.folder-name }}/analysis/descriptions.json
         fontfile: ${{ env.FONT_FILE }}
-        output-path: ${{ needs.setup-branch.outputs.folder-name }}/edited-movie/video_with_overlays.mp4
+        output-path: ${{ needs.setup-branch.outputs.folder-name }}/work-in-progress/video_with_overlays.mp4
         
     - name: Combine title and video
       id: finalize
       uses: ./modules/ffmpeg-video-concat
       with:
-        video1-path: ${{ needs.setup-branch.outputs.folder-name }}/edited-movie/title.mp4
-        video2-path: ${{ needs.setup-branch.outputs.folder-name }}/edited-movie/video_with_overlays.mp4
+        video1-path: ${{ needs.setup-branch.outputs.folder-name }}/work-in-progress/title.mp4
+        video2-path: ${{ needs.setup-branch.outputs.folder-name }}/work-in-progress/video_with_overlays.mp4
         video1-duration: ${{ fromJson(steps.read-title.outputs.title-data).duration }}
-        output-path: ${{ needs.setup-branch.outputs.folder-name }}/edited-movie/basic-edited.mp4
+        output-path: ${{ needs.setup-branch.outputs.folder-name }}/final-output/basic-edited.mp4
         
     - name: Set output path and create report
       id: set-output
       run: |
         FOLDER_NAME="${{ needs.setup-branch.outputs.folder-name }}"
-        echo "video-path=$FOLDER_NAME/edited-movie/basic-edited.mp4" >> $GITHUB_OUTPUT
+        echo "video-path=$FOLDER_NAME/final-output/basic-edited.mp4" >> $GITHUB_OUTPUT
         
         # レポート作成
-        cat > "$FOLDER_NAME/edited-movie/report.md" << EOF
+        cat > "$FOLDER_NAME/work-in-progress/report.md" << EOF
         # 動画編集レポート
         
         ## 編集内容
         - **元動画**: ${{ needs.analyze-video.outputs.actual-video-path }}
         - **タイトル**: ${{ needs.analyze-video.outputs.title }}
-        - **編集日時**: $(date)
+        - **編集日時**: $(TZ=Asia/Tokyo date)
         
         ## 追加された要素
         1. タイトル画面（冒頭3秒）
         2. 説明テキストオーバーレイ（$(jq '. | length' "$FOLDER_NAME/analysis/descriptions.json")箇所）
         
         ## 出力ファイル
-        - 最終動画: \`edited-movie/basic-edited.mp4\`
+        - 最終動画: \`final-output/basic-edited.mp4\`
         EOF
         
     - name: Commit edited video
@@ -428,7 +456,7 @@ jobs:
         if git diff --cached --quiet; then
           echo "No edited files to commit"
         else
-          git commit -m "🎬 Add edited video - Title: ${{ needs.analyze-video.outputs.title }}, Edited at: $(date)"
+          git commit -m "🎬 Add edited video - Title: ${{ needs.analyze-video.outputs.title }}, Edited at: $(TZ=Asia/Tokyo date)"
           git pull --rebase origin "${{ needs.setup-branch.outputs.branch-name }}"
           git push
         fi
@@ -479,7 +507,7 @@ jobs:
         if git diff --cached --quiet; then
           echo "No title image to commit"
         else
-          git commit -m "${{ steps.generate.outputs.commit-message || '🖼️ Add generated title background image' }} - Generated at: $(date)"
+          git commit -m "${{ steps.generate.outputs.commit-message || '🖼️ Add generated title background image' }} - Generated at: $(TZ=Asia/Tokyo date)"
           git pull --rebase origin "${{ needs.setup-branch.outputs.branch-name }}"
           git push
         fi
@@ -531,7 +559,7 @@ jobs:
         if git diff --cached --quiet; then
           echo "No music to commit"
         else
-          git commit -m "🎵 Add generated background music - Title: ${{ needs.analyze-video.outputs.title }}, Generated at: $(date)"
+          git commit -m "🎵 Add generated background music - Title: ${{ needs.analyze-video.outputs.title }}, Generated at: $(TZ=Asia/Tokyo date)"
           git pull --rebase origin "${{ needs.setup-branch.outputs.branch-name }}"
           git push
         fi
@@ -574,9 +602,9 @@ jobs:
         VERIFY_PROMPT="編集された動画を確認し、以下の項目を検証してください：1. タイトル「$TITLE」が動画の冒頭に表示されているか 2. 以下の説明テキストが指定されたタイミングで表示されているか：$DESCRIPTIONS 3. テキストのタイミングが適切か 4. 全体的な品質と改善点。JSON形式で返してください：{\"status\": \"passed\" または \"failed\", \"title_match\": true/false, \"descriptions_accurate\": true/false, \"timing_appropriate\": true/false, \"issues\": [\"問題点のリスト\"], \"recommendations\": [\"改善提案のリスト\"]}"
         
         # 編集済み動画が存在するか確認
-        if [ -f "$FOLDER_NAME/edited-movie/basic-edited.mp4" ]; then
+        if [ -f "$FOLDER_NAME/final-output/basic-edited.mp4" ]; then
           python scripts/gemini_analyzer.py \
-            "$FOLDER_NAME/edited-movie/basic-edited.mp4" \
+            "$FOLDER_NAME/final-output/basic-edited.mp4" \
             "$FOLDER_NAME/verification/final-check.json" \
             "$GEMINI_API_KEY" \
             --prompt "$VERIFY_PROMPT" \
@@ -613,7 +641,7 @@ jobs:
         echo "## Overall Status: ${STATUS^^}" >> "$FOLDER_NAME/verification/report.md"
         echo "" >> "$FOLDER_NAME/verification/report.md"
         echo "## Verification Completed" >> "$FOLDER_NAME/verification/report.md"
-        echo "- **Date**: $(date)" >> "$FOLDER_NAME/verification/report.md"
+        echo "- **Date**: $(TZ=Asia/Tokyo date)" >> "$FOLDER_NAME/verification/report.md"
              
     - name: Verify final check results
       id: verify-content
@@ -646,7 +674,7 @@ jobs:
         if git diff --cached --quiet; then
           echo "No verification files to commit"
         else
-          git commit -m "🔍 Add final verification results - Status: ${{ steps.verify-content.outputs.passed == 'true' && 'Passed' || 'Issues found' }}, Verified at: $(date)"
+          git commit -m "🔍 Add final verification results - Status: ${{ steps.verify-content.outputs.passed == 'true' && 'Passed' || 'Issues found' }}, Verified at: $(TZ=Asia/Tokyo date)"
           git pull --rebase origin "${{ needs.setup-branch.outputs.branch-name }}"
           git push
         fi
@@ -701,17 +729,17 @@ jobs:
         bgcolor: ${{ fromJson(steps.read-title-final.outputs.title-data).style.bgcolor }}
         fontfile: ${{ env.FONT_FILE }}
         background-image: ${{ needs.setup-branch.outputs.folder-name }}/title-image/background.jpg
-        output-path: ${{ needs.setup-branch.outputs.folder-name }}/edited-movie/title_with_bg.mp4
+        output-path: ${{ needs.setup-branch.outputs.folder-name }}/work-in-progress/title_with_bg.mp4
         
     - name: Combine enhanced title with video
       id: combine-enhanced
       if: needs.generate-title-image.outputs.image-generated == 'true'
       uses: ./modules/ffmpeg-video-concat
       with:
-        video1-path: ${{ needs.setup-branch.outputs.folder-name }}/edited-movie/title_with_bg.mp4
-        video2-path: ${{ needs.setup-branch.outputs.folder-name }}/edited-movie/video_with_overlays.mp4
+        video1-path: ${{ needs.setup-branch.outputs.folder-name }}/work-in-progress/title_with_bg.mp4
+        video2-path: ${{ needs.setup-branch.outputs.folder-name }}/work-in-progress/video_with_overlays.mp4
         video1-duration: ${{ fromJson(steps.read-title-final.outputs.title-data).duration }}
-        output-path: ${{ needs.setup-branch.outputs.folder-name }}/edited-movie/video_enhanced.mp4
+        output-path: ${{ needs.setup-branch.outputs.folder-name }}/work-in-progress/video_enhanced.mp4
         
     - name: Generate enhanced video with background and music
       id: finalize-enhanced
@@ -729,10 +757,10 @@ jobs:
           # オリジナルの動画（タイトルなし）から動画部分を取得
           # video_with_overlays.mp4を使用（これはタイトルなしの動画）
           
-          VIDEO_FOR_MUSIC="$FOLDER_NAME/edited-movie/video_enhanced.mp4"
+          VIDEO_FOR_MUSIC="$FOLDER_NAME/work-in-progress/video_enhanced.mp4"
         else
           echo "📹 Using standard video"
-          VIDEO_FOR_MUSIC="$FOLDER_NAME/edited-movie/basic-edited.mp4"
+          VIDEO_FOR_MUSIC="$FOLDER_NAME/final-output/basic-edited.mp4"
         fi
         
         # 音楽ファイルを探す
@@ -749,7 +777,8 @@ jobs:
         fi
         
         # 最終出力ファイル名を設定
-        FINAL_OUTPUT="$FOLDER_NAME/edited-movie/${VIDEO_BASENAME}-final-edited.mp4"
+        mkdir -p $FOLDER_NAME/final-output
+        FINAL_OUTPUT="$FOLDER_NAME/final-output/${VIDEO_BASENAME}-final-edited.mp4"
         echo "final-path=$FINAL_OUTPUT" >> $GITHUB_OUTPUT
         echo "video-for-music=$VIDEO_FOR_MUSIC" >> $GITHUB_OUTPUT
         
@@ -771,13 +800,23 @@ jobs:
         
     - name: Commit enhanced video
       run: |
+        # 最終成果物を専用ディレクトリにコピー
+        FOLDER_NAME="${{ needs.setup-branch.outputs.folder-name }}"
+        VIDEO_BASENAME="$(basename "${{ needs.analyze-video.outputs.actual-video-path }}" .mp4)"
+        
+        if [ -f "$FOLDER_NAME/work-in-progress/${VIDEO_BASENAME}-final-edited.mp4" ]; then
+          echo "📦 Organizing final output..."
+          cp "$FOLDER_NAME/work-in-progress/${VIDEO_BASENAME}-final-edited.mp4" "$FOLDER_NAME/final-output/"
+        # basic-edited.mp4は既にfinal-outputに存在するためコピー不要
+        fi
+        
         git config user.name "${{ env.GIT_USER_NAME }}"
         git config user.email "${{ env.GIT_USER_EMAIL }}"
         git add --all -- ':!.gemini/'
         if git diff --cached --quiet; then
           echo "No enhanced video to commit"
         else
-          git commit -m "🎬 Add enhanced video with title background - Title: ${{ needs.analyze-video.outputs.title }}, Enhanced at: $(date)"
+          git commit -m "🎬 Add enhanced video with title background - Title: ${{ needs.analyze-video.outputs.title }}, Enhanced at: $(TZ=Asia/Tokyo date)"
           git pull --rebase origin "${{ needs.setup-branch.outputs.branch-name }}"
           git push
         fi
@@ -817,10 +856,10 @@ jobs:
         - 🖼️ Title Image: `title-image/` directory
         - 🎵 Music: `music/` directory
         - 🎬 Edited Videos: 
-          - `edited-movie/basic-edited.mp4` (standard)
-          - `edited-movie/[original-filename]-final-edited.mp4` (with AI background and music)
+          - `final-output/basic-edited.mp4` (standard)
+          - `final-output/[original-filename]-final-edited.mp4` (with AI background and music)
         - 🔍 Verification: `verification/` directory
-        - 📝 Reports: `edited-movie/report.md`, `README.md`
+        - 📝 Reports: `work-in-progress/report.md`, `README.md`
         
         ## Workflow Status
         - ✅ Video Analysis: Completed

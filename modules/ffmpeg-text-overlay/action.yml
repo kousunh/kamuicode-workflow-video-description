@@ -99,15 +99,40 @@ runs:
           fi
         done
         
+        # 出力ディレクトリとベースファイル名を取得
+        OUTPUT_DIR=$(dirname "${{ inputs.output-path }}")
+        OUTPUT_BASENAME=$(basename "${{ inputs.output-path }}" .mp4)
+        
+        # タイムスタンプ付きファイル名を生成
+        TIMESTAMP=$(TZ=Asia/Tokyo date +%Y%m%d_%H%M%S)
+        TIMESTAMPED_OUTPUT="${OUTPUT_DIR}/${OUTPUT_BASENAME}_${TIMESTAMP}.mp4"
+        
+        # 既存の出力ファイルを削除（念のため）
+        rm -f "${{ inputs.output-path }}"
+        
         # FFmpegで動画にオーバーレイを適用
         ffmpeg -i "${{ inputs.video-path }}" \
           -vf "$FILTER_COMPLEX" \
           -c:v libx264 -c:a copy -pix_fmt yuv420p \
-          "${{ inputs.output-path }}"
+          "$TIMESTAMPED_OUTPUT"
         
-        if [ -f "${{ inputs.output-path }}" ]; then
-          echo "✅ Text overlays applied successfully"
+        if [ -f "$TIMESTAMPED_OUTPUT" ]; then
+          echo "✅ Text overlays applied successfully to: $TIMESTAMPED_OUTPUT"
+          
+          # 古いバージョンのファイルを削除
+          echo "🧹 Cleaning up old versions..."
+          find "$OUTPUT_DIR" -name "${OUTPUT_BASENAME}_*.mp4" \
+            ! -name "$(basename "$TIMESTAMPED_OUTPUT")" \
+            -type f -delete -print | while read deleted; do
+              echo "  Deleted: $deleted"
+          done
+          
+          # 最新ファイルへのシンボリックリンク作成（互換性のため）
+          ln -sf "$(basename "$TIMESTAMPED_OUTPUT")" "${{ inputs.output-path }}"
+          echo "📎 Created symlink: ${{ inputs.output-path }} -> $(basename "$TIMESTAMPED_OUTPUT")"
+          
           echo "success=true" >> $GITHUB_OUTPUT
+          echo "timestamped-output=$TIMESTAMPED_OUTPUT" >> $GITHUB_OUTPUT
         else
           echo "❌ Text overlay application failed"
           echo "success=false" >> $GITHUB_OUTPUT

@@ -28,12 +28,19 @@ cd kamuicode-workflow-video-description
 kamuicode-workflow-video-description/
 ├── video-text-enhancer.yml    # ワークフローファイル
 ├── scripts/
-│   ├── analyze_video.py      # 動画分析スクリプト
-│   └── verify_content.py     # コンテンツ検証スクリプト
+│   └── gemini_analyzer.py    # 汎用動画/画像分析スクリプト
+├── modules/
+│   ├── ffmpeg-add-music/     # 音楽追加モジュール
+│   ├── ffmpeg-text-overlay/  # テキストオーバーレイモジュール
+│   ├── ffmpeg-title-generator/  # タイトル動画生成モジュール
+│   ├── ffmpeg-video-concat/  # 動画結合モジュール
+│   ├── gemini-cli-music-generator/  # AI音楽生成モジュール
+│   └── gemini-cli-title-image-generator/  # AI画像生成モジュール
 ├── videos/
 │   └── README.md             # 動画ディレクトリの説明
 ├── README.md
 ├── SETUP.md
+├── module.md                 # モジュール詳細説明
 └── LICENSE
 ```
 
