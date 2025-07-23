@@ -179,34 +179,7 @@ AI（Gemini + Google Lyria）で音楽を生成するモジュール
     T2M_GOOGLE_LYRIA_URL: ${{ secrets.T2M_GOOGLE_LYRIA_URL }}
 ```
 
-## 7. workflow-summary-generator
-ワークフローの実行結果サマリーを生成するモジュール
-
-### 必須入力
-- `folder-name`: 出力フォルダー名
-- `branch-name`: 作業ブランチ名
-- `video-path`: 入力動画ファイルパス
-- `video-title`: 動画タイトル
-
-### オプション入力
-- `custom-sections`: カスタムセクション（YAML形式の文字列）
-- `include-timestamp`: タイムスタンプを含めるか（デフォルト: true）
-- `output-filename`: 出力ファイル名（デフォルト: README.md）
-
-### 出力
-- `summary-created`: サマリー作成の成功可否（true/false）
-
-### 使用例
-```yaml
-- uses: ./modules/workflow-summary-generator
-  with:
-    folder-name: ${{ needs.setup-branch.outputs.folder-name }}
-    branch-name: ${{ needs.setup-branch.outputs.branch-name }}
-    video-path: ${{ needs.analyze-video.outputs.actual-video-path }}
-    video-title: ${{ needs.analyze-video.outputs.title }}
-```
-
-## 8. gemini_analyzer.py (Pythonスクリプト)
+## 7. gemini_analyzer.py (Pythonスクリプト)
 動画や画像を汎用的に分析するPythonスクリプト
 
 ### 必須引数

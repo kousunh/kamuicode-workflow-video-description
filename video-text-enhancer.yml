@@ -17,18 +17,18 @@ on:
         required: false
         type: string
       text_position:
-        description: 'テキストの表示位置（auto: 自動選択、その他: 左上、上、右上、左下、下、右下）'
+        description: 'テキストの表示位置'
         required: false
         type: choice
         default: 'auto'
         options:
           - 'auto'
-          - 'top-left'
-          - 'top-center'
-          - 'top-right'
-          - 'bottom-left'
-          - 'bottom-center'
-          - 'bottom-right'
+          - '左上'
+          - '上'
+          - '右上'
+          - '左下'
+          - '下'
+          - '右下'
 
 permissions:
   contents: write
