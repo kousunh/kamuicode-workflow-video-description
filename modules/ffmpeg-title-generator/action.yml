@@ -1,0 +1,99 @@
+name: 'FFmpeg Title Generator'
+description: 'Generate title video with text overlay using FFmpeg'
+author: 'KamuiCode'
+
+inputs:
+  title:
+    description: 'タイトルテキスト'
+    required: true
+  duration:
+    description: 'タイトルの表示時間（秒）'
+    required: false
+    default: '3'
+  resolution:
+    description: '動画の解像度（例: 1920x1080）'
+    required: true
+  fontsize:
+    description: 'フォントサイズ'
+    required: false
+    default: '72'
+  color:
+    description: 'テキストの色'
+    required: false
+    default: 'white'
+  bgcolor:
+    description: '背景色'
+    required: false
+    default: 'black@0.8'
+  fontfile:
+    description: 'フォントファイルのパス'
+    required: false
+    default: '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
+  background-image:
+    description: '背景画像のパス（オプション）'
+    required: false
+  output-path:
+    description: '出力ファイルパス'
+    required: true
+
+outputs:
+  video-generated:
+    description: 'タイトル動画生成の成功可否'
+    value: ${{ steps.generate.outputs.success }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate title video
+      id: generate
+      shell: bash
+      run: |
+        # エスケープ処理
+        ESCAPED_TITLE=$(echo "${{ inputs.title }}" | sed "s/'/'\\\\''/g")
+        
+        if [ -n "${{ inputs.background-image }}" ] && [ -f "${{ inputs.background-image }}" ]; then
+          echo "🖼️ Generating title with background image"
+          
+          # 解像度を分割
+          WIDTH=$(echo "${{ inputs.resolution }}" | cut -d'x' -f1)
+          HEIGHT=$(echo "${{ inputs.resolution }}" | cut -d'x' -f2)
+          
+          # 一時ファイルにタイトルを保存（日本語対策）
+          echo "${{ inputs.title }}" > /tmp/title_text.txt
+          
+          ffmpeg -loop 1 -i "${{ inputs.background-image }}" -t ${{ inputs.duration }} \
+            -vf "scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,pad=${WIDTH}:${HEIGHT}:'(ow-iw)/2':'(oh-ih)/2',
+                 colorchannelmixer=aa=0.7,
+                 boxblur=luma_radius=5:chroma_radius=5:luma_power=1,
+                 curves=all='0/0 0.5/0.3 1/0.8',
+                 drawtext=textfile='/tmp/title_text.txt':
+                          fontfile='${{ inputs.fontfile }}':
+                          fontsize=$((${{ inputs.fontsize }} + 20)):
+                          fontcolor=${{ inputs.color }}:
+                          shadowcolor=black@0.8:
+                          shadowx=3:
+                          shadowy=3:
+                          box=1:
+                          boxcolor=black@0.4:
+                          boxborderw=20:
+                          x=(w-text_w)/2:
+                          y=(h-text_h)/2-30" \
+            -c:v libx264 -pix_fmt yuv420p \
+            "${{ inputs.output-path }}"
+        else
+          echo "📹 Generating standard title video"
+          
+          ffmpeg -f lavfi -i color=c=black:s=${{ inputs.resolution }}:d=${{ inputs.duration }} \
+            -vf "drawtext=text='$ESCAPED_TITLE':fontfile='${{ inputs.fontfile }}':fontsize=${{ inputs.fontsize }}:fontcolor=${{ inputs.color }}:x=(w-text_w)/2:y=(h-text_h)/2-30" \
+            -c:v libx264 -pix_fmt yuv420p \
+            "${{ inputs.output-path }}"
+        fi
+        
+        if [ -f "${{ inputs.output-path }}" ]; then
+          echo "✅ Title video generated successfully"
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Title video generation failed"
+          echo "success=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi

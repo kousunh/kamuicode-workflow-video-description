@@ -1,0 +1,152 @@
+name: 'Title Image Generator Module'
+description: 'AI-powered title image generation using Gemini and Imagen4'
+author: 'KamuiCode'
+
+inputs:
+  branch-name:
+    description: '作業ブランチ名'
+    required: true
+  folder-name:
+    description: '出力フォルダー名'
+    required: true
+  output-path:
+    description: '生成された画像の保存パス（フォルダー名からの相対パス）'
+    required: false
+    default: 'title-image/background.jpg'
+  commit-message:
+    description: 'Gitコミットメッセージ'
+    required: false
+    default: '🖼️ Add generated image'
+  generation-prompt:
+    description: 'Geminiエージェントに渡すプロンプト全体'
+    required: true
+  GEMINI_API_KEY:
+    description: 'Gemini API Key'
+    required: true
+  T2I_FAL_IMAGEN4_FAST_URL:
+    description: 'Text-to-Image API URL'
+    required: true
+
+outputs:
+  image-generated:
+    description: '画像生成の成功可否'
+    value: ${{ steps.verify-image.outputs.generated }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Debug - Check environment
+      shell: bash
+      run: |
+        echo "🔍 Debug: Current working directory"
+        pwd
+        echo "🔍 Debug: Directory contents before creating .gemini"
+        ls -la
+        
+    - name: Create .gemini/settings.json
+      shell: bash
+      run: |
+        mkdir -p .gemini
+        cat > .gemini/settings.json << EOF
+        {
+          "mcpServers": {
+            "t2i-fal-imagen4-fast": {
+              "httpUrl": "${{ inputs.T2I_FAL_IMAGEN4_FAST_URL }}",
+              "timeout": 300000
+            }
+          },
+          "coreTools": [
+            "ReadFileTool",
+            "WriteFileTool", 
+            "EditFileTool",
+            "ShellTool"
+          ]
+        }
+        EOF
+        echo "🔍 Debug: Verifying .gemini/settings.json was created"
+        ls -la .gemini/
+        echo "🔍 Debug: Contents of settings.json (with URL masked)"
+        cat .gemini/settings.json | sed 's/"httpUrl": ".*"/"httpUrl": "***MASKED***"/'
+        
+        # .gemini/を.gitignoreに追加（既に存在する場合は無視）
+        if ! grep -q "^\.gemini/$" .gitignore 2>/dev/null; then
+          echo -e "\n# Gemini settings (contains sensitive URLs) - auto-added by action\n.gemini/" >> .gitignore
+          echo "✅ Added .gemini/ to .gitignore"
+        else
+          echo "✅ .gemini/ is already in .gitignore"
+        fi
+        
+        # 明示的に.gemini/をgitの追跡から除外
+        echo "🔒 Ensuring .gemini/ is not tracked by git"
+        git rm -r --cached .gemini/ 2>/dev/null || true
+        
+        # git addする際の推奨コマンドを表示
+        echo "📌 Note: When committing, use: git add --all -- ':!.gemini/' to exclude .gemini/"
+        
+    - name: 🖼️ AI画像生成エージェント (Gemini + Imagen4)
+      id: generate-image
+      uses: google-gemini/gemini-cli-action@main
+      with:
+        GEMINI_API_KEY: ${{ inputs.GEMINI_API_KEY }}
+        prompt: ${{ inputs.generation-prompt }}
+      continue-on-error: true
+        
+    - name: Retry on rate limit
+      if: steps.generate-image.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "⏳ First attempt failed, waiting 60 seconds before retry..."
+        sleep 60
+        
+    - name: 🖼️ AI画像生成エージェント (Final Retry)
+      id: generate-image-retry
+      if: steps.generate-image.outcome == 'failure'
+      uses: google-gemini/gemini-cli-action@main
+      with:
+        GEMINI_API_KEY: ${{ inputs.GEMINI_API_KEY }}
+        prompt: ${{ inputs.generation-prompt }}
+        
+    - name: Check generation result
+      shell: bash
+      run: |
+        if [ "${{ steps.generate-image.outcome }}" = "success" ] || \
+           [ "${{ steps.generate-image-retry.outcome }}" = "success" ]; then
+          echo "✅ Image generation succeeded"
+        else
+          echo "❌ All attempts failed (2 attempts total)"
+          exit 1
+        fi
+             
+    - name: Verify image generation
+      id: verify-image
+      shell: bash
+      run: |
+        OUTPUT_PATH="${{ inputs.output-path }}"
+        FOLDER_NAME="${{ inputs.folder-name }}"
+        FULL_PATH="${FOLDER_NAME}/${OUTPUT_PATH}"
+        
+        echo "🔍 Checking for generated image at: $FULL_PATH"
+        
+        if [ -f "$FULL_PATH" ]; then
+          FILE_SIZE=$(stat -c%s "$FULL_PATH" 2>/dev/null || stat -f%z "$FULL_PATH" 2>/dev/null || echo "0")
+          if [ "$FILE_SIZE" -gt 1000 ]; then
+            echo "✅ Image generated successfully (Size: $FILE_SIZE bytes)"
+            echo "generated=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Image file too small (Size: $FILE_SIZE bytes)"
+            echo "generated=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "⚠️ Image not generated at: $FULL_PATH"
+          echo "🔍 Directory contents:"
+          ls -la "$FOLDER_NAME/" || echo "Directory not found"
+          echo "generated=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Clean up .gemini directory
+      if: always()
+      shell: bash
+      run: |
+        echo "🧹 Cleaning up .gemini directory"
+        rm -rf .gemini/
+        echo "✅ .gemini directory removed"

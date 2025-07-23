@@ -1,0 +1,115 @@
+name: 'FFmpeg Text Overlay'
+description: 'Apply text overlays to video using FFmpeg'
+author: 'KamuiCode'
+
+inputs:
+  video-path:
+    description: '入力動画ファイルパス'
+    required: true
+  descriptions-json:
+    description: '説明文JSONファイルのパス'
+    required: true
+  fontfile:
+    description: 'フォントファイルのパス'
+    required: false
+    default: '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
+  output-path:
+    description: '出力ファイルパス'
+    required: true
+
+outputs:
+  video-generated:
+    description: 'オーバーレイ動画生成の成功可否'
+    value: ${{ steps.overlay.outputs.success }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Apply text overlays
+      id: overlay
+      shell: bash
+      run: |
+        # 説明テキストの読み込み
+        DESCRIPTIONS=$(cat "${{ inputs.descriptions-json }}")
+        DESC_COUNT=$(echo "$DESCRIPTIONS" | jq '. | length')
+        
+        echo "📝 Applying $DESC_COUNT text overlays"
+        
+        # フィルタコンプレックスの構築
+        FILTER_COMPLEX=""
+        
+        for i in $(seq 0 $((DESC_COUNT - 1))); do
+          DESC=$(echo "$DESCRIPTIONS" | jq -r ".[$i]")
+          TIMESTAMP=$(echo "$DESC" | jq -r '.timestamp')
+          TEXT=$(echo "$DESC" | jq -r '.text')
+          ESCAPED_TEXT=$(echo "$TEXT" | sed "s/'/'\\\\''/g")
+          DURATION=$(echo "$DESC" | jq -r '.duration // 6')
+          FONTSIZE=$(echo "$DESC" | jq -r '.fontsize // 48')
+          POSITION=$(echo "$DESC" | jq -r '.position // "top-left"')
+          
+          # Position-based coordinates
+          case "$POSITION" in
+            "top-left")
+              X_POS="50"
+              Y_POS="40"
+              ;;
+            "top-center")
+              X_POS="(w-text_w)/2"
+              Y_POS="40"
+              ;;
+            "top-right")
+              X_POS="w-text_w-50"
+              Y_POS="40"
+              ;;
+            "bottom-left")
+              X_POS="50"
+              Y_POS="h-th-50"
+              ;;
+            "bottom-center")
+              X_POS="(w-text_w)/2"
+              Y_POS="h-th-50"
+              ;;
+            "bottom-right")
+              X_POS="w-text_w-50"
+              Y_POS="h-th-50"
+              ;;
+            *)
+              X_POS="(w-text_w)/2"
+              Y_POS="40"
+              ;;
+          esac
+          
+          # MM:SS を秒に変換
+          MINUTES=$(echo $TIMESTAMP | cut -d: -f1)
+          SECONDS=$(echo $TIMESTAMP | cut -d: -f2)
+          START_TIME=$((10#$MINUTES * 60 + 10#$SECONDS))
+          END_TIME=$((START_TIME + DURATION))
+          
+          # フェードイン/アウトの時間
+          FADE_DURATION=0.5
+          FADE_OUT_START=$(echo "$END_TIME - $FADE_DURATION" | bc)
+          
+          # フィルタの追加
+          DRAWTEXT="drawtext=text='$ESCAPED_TEXT':fontfile='${{ inputs.fontfile }}':fontsize=$FONTSIZE:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=10:x=$X_POS:y=$Y_POS:enable='between(t,$START_TIME,$END_TIME)':alpha='if(lt(t,$START_TIME+$FADE_DURATION),(t-$START_TIME)/$FADE_DURATION,if(gt(t,$FADE_OUT_START),($END_TIME-t)/$FADE_DURATION,1))'"
+          
+          if [ $i -eq 0 ]; then
+            FILTER_COMPLEX="$DRAWTEXT"
+          else
+            FILTER_COMPLEX="$FILTER_COMPLEX,$DRAWTEXT"
+          fi
+        done
+        
+        # FFmpegで動画にオーバーレイを適用
+        ffmpeg -i "${{ inputs.video-path }}" \
+          -vf "$FILTER_COMPLEX" \
+          -c:v libx264 -c:a copy -pix_fmt yuv420p \
+          "${{ inputs.output-path }}"
+        
+        if [ -f "${{ inputs.output-path }}" ]; then
+          echo "✅ Text overlays applied successfully"
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Text overlay application failed"
+          echo "success=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi

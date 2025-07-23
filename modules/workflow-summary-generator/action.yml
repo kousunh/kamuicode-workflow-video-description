@@ -1,0 +1,104 @@
+name: 'Workflow Summary Generator'
+description: 'Generate comprehensive workflow summary in README.md format'
+author: 'KamuiCode'
+
+inputs:
+  folder-name:
+    description: '出力フォルダー名'
+    required: true
+  branch-name:
+    description: '作業ブランチ名'
+    required: true
+  video-path:
+    description: '入力動画ファイルパス'
+    required: true
+  video-title:
+    description: '動画タイトル'
+    required: true
+  custom-sections:
+    description: 'カスタムセクション（YAML形式の文字列）'
+    required: false
+    default: ''
+  include-timestamp:
+    description: 'タイムスタンプを含めるか'
+    required: false
+    default: 'true'
+  output-filename:
+    description: '出力ファイル名'
+    required: false
+    default: 'README.md'
+
+outputs:
+  summary-created:
+    description: 'サマリー作成の成功可否'
+    value: ${{ steps.create-summary.outputs.created }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create workflow summary
+      id: create-summary
+      shell: bash
+      run: |
+        FOLDER_NAME="${{ inputs.folder-name }}"
+        OUTPUT_FILE="$FOLDER_NAME/${{ inputs.output-filename }}"
+        
+        # 基本的なサマリーの作成
+        cat > "$OUTPUT_FILE" << 'EOF'
+        # Gemini Video Analysis & Editing Results
+        
+        ## Overview
+        - **Input Video**: ${{ inputs.video-path }}
+        - **Title**: ${{ inputs.video-title }}
+        EOF
+        
+        # タイムスタンプの追加（オプション）
+        if [ "${{ inputs.include-timestamp }}" = "true" ]; then
+          echo "- **Processed At**: $(date)" >> "$OUTPUT_FILE"
+        fi
+        
+        # ブランチ情報の追加
+        echo "- **Branch**: ${{ inputs.branch-name }}" >> "$OUTPUT_FILE"
+        
+        # 標準的なコンテンツセクション
+        cat >> "$OUTPUT_FILE" << 'EOF'
+        
+        ## Generated Content
+        - **Analysis**: `analysis/` directory
+          - `title.json`: Video title configuration
+          - `descriptions.json`: Overlay text configurations
+          - `text-position.json`: Unified text position
+          - `summary.md`: Analysis report
+        - **Title Image**: `title-image/` directory
+          - `background.jpg`: AI-generated title background
+          - `generation-info.json`: Image generation details
+        - **Music**: `music/` directory
+          - `background.mp3`: AI-generated background music
+          - `generation-info.json`: Music generation details
+        - **Edited Video**: 
+          - `edited-movie/basic-edited.mp4`: Basic edited video
+          - `edited-movie/[original-filename]-final-edited.mp4`: Enhanced video with AI background and music
+        - **Verification**: `verification/` directory
+          - `final-check.json`: Verification results
+          - `report.md`: Detailed verification report
+        - **Reports**: `edited-movie/report.md`, `README.md`
+        
+        ## Processing Pipeline
+        1. ✅ Video Analysis: Gemini Vision analyzed content
+        2. ✅ Title Generation: Created opening title screen
+        3. ✅ Text Overlays: Added explanatory text with fade effects
+        4. ✅ Title Image: AI-generated background image (if successful)
+        5. ✅ Music: AI-generated background music (if successful)
+        6. ✅ Final Verification: Content consistency check
+        7. ✅ Enhanced Video: Title with AI background and music
+        8. ✅ Final Edit: Combined all elements
+        EOF
+        
+        # カスタムセクションの追加（オプション）
+        if [ -n "${{ inputs.custom-sections }}" ]; then
+          echo "" >> "$OUTPUT_FILE"
+          echo "${{ inputs.custom-sections }}" >> "$OUTPUT_FILE"
+        fi
+        
+        echo "✅ Summary created at: $OUTPUT_FILE"
+        echo "created=true" >> $GITHUB_OUTPUT

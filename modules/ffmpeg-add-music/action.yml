@@ -1,0 +1,59 @@
+name: 'FFmpeg Add Background Music'
+description: 'Add background music to video with volume control and looping'
+author: 'KamuiCode'
+
+inputs:
+  video-path:
+    description: '入力動画ファイルパス'
+    required: true
+  music-path:
+    description: '音楽ファイルパス（mp3またはwav）'
+    required: true
+  volume:
+    description: '音楽の音量（0.0-1.0）'
+    required: false
+    default: '0.3'
+  output-path:
+    description: '出力ファイルパス'
+    required: true
+
+outputs:
+  video-generated:
+    description: '音楽付き動画生成の成功可否'
+    value: ${{ steps.add-music.outputs.success }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Get video duration
+      id: get-duration
+      shell: bash
+      run: |
+        # 動画の長さを取得
+        VIDEO_DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${{ inputs.video-path }}")
+        echo "duration=$VIDEO_DURATION" >> $GITHUB_OUTPUT
+        echo "Video duration: $VIDEO_DURATION seconds"
+        
+    - name: Add background music
+      id: add-music
+      shell: bash
+      run: |
+        echo "🎵 Adding background music"
+        echo "Music volume: ${{ inputs.volume }}"
+        
+        # 音楽をループして動画の長さに合わせる
+        ffmpeg -stream_loop -1 -i "${{ inputs.music-path }}" -i "${{ inputs.video-path }}" \
+          -t ${{ steps.get-duration.outputs.duration }} \
+          -filter_complex "[0:a]volume=${{ inputs.volume }}[music];[1:a][music]amix=inputs=2:duration=first:dropout_transition=2[aout]" \
+          -map 1:v -map "[aout]" \
+          -c:v copy -c:a aac -shortest \
+          "${{ inputs.output-path }}"
+        
+        if [ -f "${{ inputs.output-path }}" ]; then
+          echo "✅ Background music added successfully"
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Failed to add background music"
+          echo "success=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi

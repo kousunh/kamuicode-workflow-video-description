@@ -1,0 +1,950 @@
+name: Video Text Enhancer
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_path:
+        description: '分析対象の動画ファイルパス（リポジトリ内の相対パス）。auto-selectはvideosディレクトリの最新の動画を選択'
+        required: true
+        type: string
+        default: 'auto-select'
+      edit_title:
+        description: '動画タイトル（省略時は自動生成）'
+        required: false
+        type: string
+      description_prompt:
+        description: '説明文生成時の追加プロンプト（任意）'
+        required: false
+        type: string
+      text_position:
+        description: 'テキストの表示位置（auto: 自動選択、その他: 左上、上、右上、左下、下、右下）'
+        required: false
+        type: choice
+        default: 'auto'
+        options:
+          - 'auto'
+          - 'top-left'
+          - 'top-center'
+          - 'top-right'
+          - 'bottom-left'
+          - 'bottom-center'
+          - 'bottom-right'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  GIT_USER_NAME: "github-actions[bot]"
+  GIT_USER_EMAIL: "github-actions[bot]@users.noreply.github.com"
+  FONT_FILE: "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+
+jobs:
+  setup-branch:
+    runs-on: ubuntu-latest
+    outputs:
+      branch-name: ${{ steps.branch.outputs.branch-name }}
+      folder-name: ${{ steps.branch.outputs.folder-name }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.PAT_TOKEN || github.token }}
+        
+    - name: Create branch name
+      id: branch
+      run: |
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        BRANCH_NAME="video-edit-$TIMESTAMP"
+        FOLDER_NAME="movie-edit-$TIMESTAMP"
+        echo "branch-name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+        echo "folder-name=$FOLDER_NAME" >> $GITHUB_OUTPUT
+        
+    - name: Create and switch to new branch
+      run: |
+        git config --global user.name "${{ env.GIT_USER_NAME }}"
+        git config --global user.email "${{ env.GIT_USER_EMAIL }}"
+        git checkout -b "${{ steps.branch.outputs.branch-name }}"
+        git push -u origin "${{ steps.branch.outputs.branch-name }}"
+
+  analyze-video:
+    runs-on: ubuntu-latest
+    needs: setup-branch
+    outputs:
+      title: ${{ steps.verify.outputs.title }}
+      analysis-completed: ${{ steps.verify.outputs.completed }}
+      descriptions-summary: ${{ steps.verify.outputs.descriptions-summary }}
+      actual-video-path: ${{ steps.detect-video.outputs.video-path }}
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.setup-branch.outputs.branch-name }}
+        
+    - name: Detect video file
+      id: detect-video
+      run: |
+        VIDEO_PATH="${{ github.event.inputs.video_path }}"
+        
+        # If auto-select is specified, find the most recently updated video
+        if [ "$VIDEO_PATH" = "auto-select" ]; then
+          echo "🔍 自動選択モード: videosディレクトリから最新の動画を検索中..."
+          
+          # Find the most recently modified video file in the videos directory
+          echo "📂 videosディレクトリの内容:"
+          ls -la videos/ || true
+          
+          # Use git log to find the most recently committed video file
+          echo "🔍 Gitの履歴から最新の動画ファイルを検索中..."
+          
+          # Show recent commits for videos
+          echo "📋 最近のビデオファイルのコミット履歴:"
+          git log --oneline --name-only --pretty=format:"%h %ad %s" --date=short -- 'videos/*' | head -20 || true
+          
+          # Get the most recently committed video file from git history
+          LATEST_VIDEO=$(git log --name-only --pretty=format: -- 'videos/*.mp4' 'videos/*.avi' 'videos/*.mov' 'videos/*.mkv' 'videos/*.webm' | grep -E '\.(mp4|avi|mov|mkv|webm)$' | head -1)
+          
+          # If no video found in git history, fall back to ls
+          if [ -z "$LATEST_VIDEO" ]; then
+            echo "⚠️ Git履歴から検出できませんでした。ファイルシステムから検索します..."
+            LATEST_VIDEO=$(ls videos/*.mp4 videos/*.avi videos/*.mov videos/*.mkv videos/*.webm 2>/dev/null | head -1)
+          fi
+          
+          if [ -z "$LATEST_VIDEO" ]; then
+            echo "❌ videosディレクトリに動画ファイルが見つかりません"
+            exit 1
+          fi
+          
+          VIDEO_PATH="$LATEST_VIDEO"
+          echo "✅ 最新の動画を検出しました: $VIDEO_PATH"
+          echo "📹 選択された動画: $VIDEO_PATH"
+          
+          # 動画の更新日時も表示（複数の方法を試す）
+          if command -v stat >/dev/null 2>&1; then
+            # GNU stat (Linux)
+            VIDEO_DATE=$(stat -c "%y" "$VIDEO_PATH" 2>/dev/null)
+            if [ -z "$VIDEO_DATE" ]; then
+              # BSD stat (macOS)
+              VIDEO_DATE=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "$VIDEO_PATH" 2>/dev/null)
+            fi
+          fi
+          
+          if [ -n "$VIDEO_DATE" ]; then
+            echo "📅 更新日時: $VIDEO_DATE"
+          fi
+          
+          # デバッグ情報：全動画ファイルの更新日時を表示
+          echo "🔍 全動画ファイルの更新日時:"
+          ls -lt videos/*.mp4 videos/*.avi videos/*.mov videos/*.mkv videos/*.webm 2>/dev/null || echo "No video files found"
+        fi
+        
+        echo "video-path=$VIDEO_PATH" >> $GITHUB_OUTPUT
+        
+    - name: Verify video file exists
+      run: |
+        VIDEO_PATH="${{ steps.detect-video.outputs.video-path }}"
+        
+        if [ ! -f "$VIDEO_PATH" ]; then
+          echo "❌ Video file not found: $VIDEO_PATH"
+          exit 1
+        fi
+        echo "✅ Video file found: $VIDEO_PATH"
+        
+        # Display video information
+        echo "📹 Video details:"
+        ls -la "$VIDEO_PATH"
+        
+        # Create analysis directory
+        mkdir -p "${{ needs.setup-branch.outputs.folder-name }}/analysis"
+        echo "✅ Created analysis directory"
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install Python dependencies
+      run: |
+        pip install google-generativeai
+        
+    - name: 📊 動画分析 (Python Script with Gemini Vision)
+      id: analyze
+      env:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      run: |
+        set -e
+        echo "Starting video analysis..."
+        echo "Video path: ${{ steps.detect-video.outputs.video-path }}"
+        echo "Output folder: ${{ needs.setup-branch.outputs.folder-name }}"
+        
+        python scripts/analyze_video.py \
+          "${{ steps.detect-video.outputs.video-path }}" \
+          "${{ needs.setup-branch.outputs.folder-name }}" \
+          "$GEMINI_API_KEY" \
+          "${{ github.event.inputs.edit_title }}" \
+          "${{ github.event.inputs.description_prompt }}" \
+          "${{ github.event.inputs.text_position }}"
+        
+        # Verify the analysis output exists
+        if [ -f "${{ needs.setup-branch.outputs.folder-name }}/analysis/title.json" ]; then
+          echo "✅ Analysis completed - title.json created"
+        else
+          echo "❌ Analysis failed - title.json not found"
+          exit 1
+        fi
+          
+    - name: Verify analysis results
+      id: verify
+      run: |
+        FOLDER_NAME="${{ needs.setup-branch.outputs.folder-name }}"
+        
+        # Debug: Check current directory and folder structure
+        echo "📍 Current directory: $(pwd)"
+        echo "📁 Checking for folder: $FOLDER_NAME"
+        ls -la "$FOLDER_NAME/" || echo "Folder not found: $FOLDER_NAME"
+        
+        # タイトルJSONの確認
+        if [ -f "$FOLDER_NAME/analysis/title.json" ]; then
+          echo "📄 title.json found, contents:"
+          cat "$FOLDER_NAME/analysis/title.json"
+          TITLE=$(jq -r '.title' "$FOLDER_NAME/analysis/title.json")
+          echo "✅ Title generated: $TITLE"
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Title file not found at: $FOLDER_NAME/analysis/title.json"
+          echo "📁 Contents of $FOLDER_NAME:"
+          ls -la "$FOLDER_NAME/" || echo "Folder not found"
+          echo "📁 Contents of $FOLDER_NAME/analysis:"
+          ls -la "$FOLDER_NAME/analysis/" || echo "Analysis folder not found"
+          exit 1
+        fi
+        
+        # 説明JSONの確認
+        if [ -f "$FOLDER_NAME/analysis/descriptions.json" ]; then
+          DESC_COUNT=$(jq '. | length' "$FOLDER_NAME/analysis/descriptions.json")
+          echo "✅ Descriptions generated: $DESC_COUNT items"
+          
+          # 説明文のサマリーを作成
+          DESCRIPTIONS_SUMMARY=$(jq -r '[.[] | .text] | join(", ")' "$FOLDER_NAME/analysis/descriptions.json")
+          echo "descriptions-summary=$DESCRIPTIONS_SUMMARY" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Descriptions file not found"
+          exit 1
+        fi
+        
+        echo "completed=true" >> $GITHUB_OUTPUT
+        
+    - name: Commit analysis results
+      run: |
+        git config user.name "${{ env.GIT_USER_NAME }}"
+        git config user.email "${{ env.GIT_USER_EMAIL }}"
+        
+        # Debug: Show what files were created
+        echo "📁 Files in analysis directory:"
+        ls -la "${{ needs.setup-branch.outputs.folder-name }}/analysis/" || echo "Analysis directory not found"
+        
+        # Add the specific folder
+        git add "${{ needs.setup-branch.outputs.folder-name }}/"
+        
+        # Check git status
+        echo "📋 Git status:"
+        git status
+        
+        if git diff --cached --quiet; then
+          echo "No analysis files to commit"
+        else
+          git commit -m "📊 Add video analysis results - Video: ${{ steps.detect-video.outputs.video-path }}, Title: ${{ steps.verify.outputs.title }}, Analyzed at: $(date)"
+          git pull --rebase origin "${{ needs.setup-branch.outputs.branch-name }}"
+          git push
+        fi
+
+  edit-video:
+    runs-on: ubuntu-latest
+    needs: [setup-branch, analyze-video]
+    if: needs.analyze-video.outputs.analysis-completed == 'true'
+    outputs:
+      edited-video-path: ${{ steps.finalize.outputs.video-path }}
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.setup-branch.outputs.branch-name }}
+        
+    - name: Install FFmpeg and Fonts
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+        # Install Japanese fonts for better text rendering
+        sudo apt-get install -y fonts-noto-cjk fonts-ipafont-gothic fonts-ipafont-mincho
+        ffmpeg -version
+        fc-list | grep -i gothic || true
+        
+    - name: Create output directory
+      run: |
+        mkdir -p ${{ needs.setup-branch.outputs.folder-name }}/edited-movie
+        
+    - name: Get video resolution
+      id: video-res
+      run: |
+        RESOLUTION=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${{ needs.analyze-video.outputs.actual-video-path }}")
+        echo "video_resolution=$RESOLUTION" >> $GITHUB_OUTPUT
+        echo "Original video resolution: $RESOLUTION"
+
+    - name: Generate title video
+      run: |
+        FOLDER_NAME="${{ needs.setup-branch.outputs.folder-name }}"
+        TITLE=$(jq -r '.title' "$FOLDER_NAME/analysis/title.json")
+        DURATION=$(jq -r '.duration' "$FOLDER_NAME/analysis/title.json")
+        FONTSIZE=$(jq -r '.style.fontsize' "$FOLDER_NAME/analysis/title.json")
+        COLOR=$(jq -r '.style.color' "$FOLDER_NAME/analysis/title.json")
+        BGCOLOR=$(jq -r '.style.bgcolor' "$FOLDER_NAME/analysis/title.json")
+        # Use Noto Sans CJK JP for better Japanese support
+        FONTFILE="${{ env.FONT_FILE }}"
+        
+        # タイトル画面の生成（日本語対応）
+        # エスケープ処理を追加
+        ESCAPED_TITLE=$(echo "$TITLE" | sed "s/'/'\\\\''/g")
+        
+        ffmpeg -f lavfi -i color=c=black:s=${{ steps.video-res.outputs.video_resolution }}:d=$DURATION \
+          -vf "drawtext=text='$ESCAPED_TITLE':fontfile='$FONTFILE':fontsize=$FONTSIZE:fontcolor=$COLOR:x=(w-text_w)/2:y=(h-text_h)/2-30" \
+          -c:v libx264 -pix_fmt yuv420p \
+          "$FOLDER_NAME/edited-movie/title.mp4"
+          
+        echo "✅ Title video generated"
+        
+    - name: Prepare video with overlays
+      run: |
+        FOLDER_NAME="${{ needs.setup-branch.outputs.folder-name }}"
+        VIDEO_PATH="${{ needs.analyze-video.outputs.actual-video-path }}"
+        
+        # 説明テキストの読み込みとフィルタ構築
+        DESCRIPTIONS=$(cat "$FOLDER_NAME/analysis/descriptions.json")
+        
+        # 統一位置の読み込み
+        if [ -f "$FOLDER_NAME/analysis/text-position.json" ]; then
+          UNIFIED_POSITION=$(jq -r '.position' "$FOLDER_NAME/analysis/text-position.json")
+        else
+          UNIFIED_POSITION="top-left"
+        fi
+        
+        # フィルタコンプレックスの構築
+        FILTER_COMPLEX=""
+        DESC_COUNT=$(echo "$DESCRIPTIONS" | jq '. | length')
+        
+        # Noto Sans CJK JP for Japanese text
+        FONTFILE="${{ env.FONT_FILE }}"
+        
+        for i in $(seq 0 $((DESC_COUNT - 1))); do
+          DESC=$(echo "$DESCRIPTIONS" | jq -r ".[$i]")
+          TIMESTAMP=$(echo "$DESC" | jq -r '.timestamp')
+          TEXT=$(echo "$DESC" | jq -r '.text')
+          # 日本語テキストのエスケープ処理
+          ESCAPED_TEXT=$(echo "$TEXT" | sed "s/'/'\\\\''/g")
+          DURATION=$(echo "$DESC" | jq -r '.duration // 6')
+          FONTSIZE=$(echo "$DESC" | jq -r '.fontsize // 48')
+          
+          # Use unified position for all text overlays
+          POSITION="$UNIFIED_POSITION"
+          
+          # Position-based coordinates
+          case "$POSITION" in
+            "top-left")
+              X_POS="50"
+              Y_POS="40"
+              ;;
+            "top-center")
+              X_POS="(w-text_w)/2"
+              Y_POS="40"
+              ;;
+            "top-right")
+              X_POS="w-text_w-50"
+              Y_POS="40"
+              ;;
+            "bottom-left")
+              X_POS="50"
+              Y_POS="h-th-50"
+              ;;
+            "bottom-center")
+              X_POS="(w-text_w)/2"
+              Y_POS="h-th-50"
+              ;;
+            "bottom-right")
+              X_POS="w-text_w-50"
+              Y_POS="h-th-50"
+              ;;
+            *)
+              # Default to top-center
+              X_POS="(w-text_w)/2"
+              Y_POS="40"
+              ;;
+          esac
+          
+          # MM:SS を秒に変換
+          MINUTES=$(echo $TIMESTAMP | cut -d: -f1)
+          SECONDS=$(echo $TIMESTAMP | cut -d: -f2)
+          START_TIME=$((10#$MINUTES * 60 + 10#$SECONDS))
+          END_TIME=$((START_TIME + DURATION))
+          
+          # フェードイン/アウトの時間
+          FADE_DURATION=0.5
+          FADE_OUT_START=$(echo "$END_TIME - $FADE_DURATION" | bc)
+          
+          # Apply font size multiplier for better visibility
+          FONTSIZE=$((FONTSIZE))
+          
+          if [ $i -eq 0 ]; then
+            FILTER_COMPLEX="drawtext=text='$ESCAPED_TEXT':fontfile='$FONTFILE':fontsize=$FONTSIZE:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=10:x=$X_POS:y=$Y_POS:enable='between(t,$START_TIME,$END_TIME)':alpha='if(lt(t,$START_TIME+$FADE_DURATION),(t-$START_TIME)/$FADE_DURATION,if(gt(t,$FADE_OUT_START),($END_TIME-t)/$FADE_DURATION,1))'"
+          else
+            FILTER_COMPLEX="$FILTER_COMPLEX,drawtext=text='$ESCAPED_TEXT':fontfile='$FONTFILE':fontsize=$FONTSIZE:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=10:x=$X_POS:y=$Y_POS:enable='between(t,$START_TIME,$END_TIME)':alpha='if(lt(t,$START_TIME+$FADE_DURATION),(t-$START_TIME)/$FADE_DURATION,if(gt(t,$FADE_OUT_START),($END_TIME-t)/$FADE_DURATION,1))'"
+          fi
+        done
+        
+        # 元動画にオーバーレイを適用
+        ffmpeg -i "$VIDEO_PATH" \
+          -vf "$FILTER_COMPLEX" \
+          -c:v libx264 -c:a copy -pix_fmt yuv420p \
+          "$FOLDER_NAME/edited-movie/video_with_overlays.mp4"
+          
+        echo "✅ Video with overlays generated"
+        
+    - name: Combine title and video
+      id: finalize
+      run: |
+        FOLDER_NAME="${{ needs.setup-branch.outputs.folder-name }}"
+        
+        # タイトルの長さを取得（秒単位）
+        TITLE_DURATION=$(jq -r '.duration' "$FOLDER_NAME/analysis/title.json")
+        
+        # タイトル動画と本編を結合（音声は元動画から取得）
+        # タイトル部分は無音、本編は元の音声を保持
+        # adelayはミリ秒単位なので1000を掛ける
+        DELAY_MS=$(echo "$TITLE_DURATION * 1000" | bc | cut -d. -f1)
+        
+        # 解像度を幅と高さに分割
+        RESOLUTION="${{ steps.video-res.outputs.video_resolution }}"
+        WIDTH=$(echo $RESOLUTION | cut -d'x' -f1)
+        HEIGHT=$(echo $RESOLUTION | cut -d'x' -f2)
+        
+        ffmpeg -i "$FOLDER_NAME/edited-movie/title.mp4" -i "$FOLDER_NAME/edited-movie/video_with_overlays.mp4" \
+          -filter_complex "[1:v]scale=${WIDTH}:${HEIGHT}[v1];[0:v][v1]concat=n=2:v=1:a=0[outv];[1:a]adelay=${DELAY_MS}|${DELAY_MS}[outa]" \
+          -map "[outv]" -map "[outa]" \
+          -c:v libx264 -c:a aac -pix_fmt yuv420p \
+          "$FOLDER_NAME/edited-movie/basic-edited.mp4"
+          
+        echo "✅ Final video generated"
+        echo "video-path=$FOLDER_NAME/edited-movie/basic-edited.mp4" >> $GITHUB_OUTPUT
+        
+        # レポート作成
+        cat > "$FOLDER_NAME/edited-movie/report.md" << EOF
+        # 動画編集レポート
+        
+        ## 編集内容
+        - **元動画**: ${{ needs.analyze-video.outputs.actual-video-path }}
+        - **タイトル**: ${{ needs.analyze-video.outputs.title }}
+        - **編集日時**: $(date)
+        
+        ## 追加された要素
+        1. タイトル画面（冒頭3秒）
+        2. 説明テキストオーバーレイ（$(jq '. | length' "$FOLDER_NAME/analysis/descriptions.json")箇所）
+        
+        ## 出力ファイル
+        - 最終動画: \`edited-movie/basic-edited.mp4\`
+        EOF
+        
+    - name: Commit edited video
+      run: |
+        git config user.name "${{ env.GIT_USER_NAME }}"
+        git config user.email "${{ env.GIT_USER_EMAIL }}"
+        git add .
+        if git diff --cached --quiet; then
+          echo "No edited files to commit"
+        else
+          git commit -m "🎬 Add edited video - Title: ${{ needs.analyze-video.outputs.title }}, Edited at: $(date)"
+          git pull --rebase origin "${{ needs.setup-branch.outputs.branch-name }}"
+          git push
+        fi
+
+  generate-title-image:
+    uses: ./.github/workflows/module-title-image-generator.yml
+    needs: [setup-branch, analyze-video]
+    if: needs.analyze-video.outputs.analysis-completed == 'true'
+    with:
+      branch-name: ${{ needs.setup-branch.outputs.branch-name }}
+      folder-name: ${{ needs.setup-branch.outputs.folder-name }}
+      output-path: 'title-image/background.jpg'
+      commit-message: '🖼️ Add generated title background image - Title: ${{ needs.analyze-video.outputs.title }}'
+      generation-prompt: |
+        🖼️ **タイトル画像生成タスク**
+        
+        タイトル「${{ needs.analyze-video.outputs.title }}」に基づいた背景画像を生成してください。
+        
+        1. `mkdir -p ${{ needs.setup-branch.outputs.folder-name }}/title-image`
+        2. タイトルから高品質な背景画像のプロンプトを作成（英語で、cinematic, bokeh effect, warm color palette等を含む）
+        3. `mcp__t2i-fal-imagen4-fast__imagen4_fast_submit`で生成開始
+        4. `mcp__t2i-fal-imagen4-fast__imagen4_fast_status`で完了確認（最大20回）
+        5. `mcp__t2i-fal-imagen4-fast__imagen4_fast_result`でURL取得
+        6. 重要: 必ず`curl -L -o "$(pwd)/${{ needs.setup-branch.outputs.folder-name }}/title-image/background.jpg" "$IMAGE_URL"`でダウンロード
+        7. generation-info.jsonに生成情報を保存
+    secrets:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      T2I_FAL_IMAGEN4_FAST_URL: ${{ secrets.T2I_FAL_IMAGEN4_FAST_URL }}
+
+  generate-music:
+    runs-on: ubuntu-latest
+    needs: [setup-branch, analyze-video]
+    if: needs.analyze-video.outputs.analysis-completed == 'true'
+    outputs:
+      music-generated: ${{ steps.verify-music.outputs.generated }}
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.setup-branch.outputs.branch-name }}
+        
+    - name: Create .gemini/settings.json
+      run: |
+        mkdir -p .gemini
+        cat > .gemini/settings.json << EOF
+        {
+          "mcpServers": {
+            "t2i-fal-imagen4-fast": {
+              "httpUrl": "${{ secrets.T2I_FAL_IMAGEN4_FAST_URL }}",
+              "timeout": 300000
+            },
+            "t2m-google-lyria": {
+              "httpUrl": "${{ secrets.T2M_GOOGLE_LYRIA_URL }}",
+              "timeout": 300000
+            }
+          },
+          "coreTools": [
+            "ReadFileTool",
+            "WriteFileTool", 
+            "EditFileTool",
+            "ShellTool"
+          ]
+        }
+        EOF
+        
+    - name: 🎵 音楽生成エージェント (Gemini + Google Lyria)
+      id: generate-music
+      uses: google-gemini/gemini-cli-action@main
+      with:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        prompt: |
+          🎵 **音楽生成タスク**
+          
+          タイトル「${{ needs.analyze-video.outputs.title }}」と内容「${{ needs.analyze-video.outputs.descriptions-summary }}」に基づいた15-30秒の短い音楽を生成してください。
+          
+          1. `mkdir -p ${{ needs.setup-branch.outputs.folder-name }}/music`
+          2. 英語で音楽プロンプトを作成（例: "A short 20-second ambient music"）
+          3. `mcp__t2m-google-lyria__lyria_submit`で生成開始
+          4. `mcp__t2m-google-lyria__lyria_status`で完了確認（最大30回、5秒間隔）
+          5. `mcp__t2m-google-lyria__lyria_result`でURL取得
+          6. **必須**: `curl -L -f --retry 3 -o "$(pwd)/${{ needs.setup-branch.outputs.folder-name }}/music/background.wav" "$MUSIC_URL"`でダウンロード
+          7. ファイルサイズが50KB未満なら再試行
+          8. generation-info.jsonに生成情報を保存
+             
+    - name: Verify music generation
+      id: verify-music
+      run: |
+        FOLDER_NAME="${{ needs.setup-branch.outputs.folder-name }}"
+        
+        # mp3またはwavファイルを確認
+        if [ -f "$FOLDER_NAME/music/background.mp3" ]; then
+          MUSIC_FILE="$FOLDER_NAME/music/background.mp3"
+        elif [ -f "$FOLDER_NAME/music/background.wav" ]; then
+          MUSIC_FILE="$FOLDER_NAME/music/background.wav"
+        else
+          MUSIC_FILE=""
+        fi
+        
+        if [ -n "$MUSIC_FILE" ]; then
+          FILE_SIZE=$(stat -c%s "$MUSIC_FILE" 2>/dev/null || stat -f%z "$MUSIC_FILE" 2>/dev/null || echo "0")
+          # Check for reasonable audio file size (at least 50KB)
+          if [ "$FILE_SIZE" -gt 50000 ]; then
+            echo "✅ Music generated successfully (Size: $FILE_SIZE bytes)"
+            
+            # Additional validation using ffprobe
+            if command -v ffprobe >/dev/null 2>&1; then
+              DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$MUSIC_FILE" 2>/dev/null || echo "0")
+              echo "Music duration: $DURATION seconds"
+              
+              if [ "$(echo "$DURATION > 5" | bc -l 2>/dev/null || echo 0)" -eq 1 ]; then
+                echo "generated=true" >> $GITHUB_OUTPUT
+              else
+                echo "⚠️ Music file too short (Duration: $DURATION seconds)"
+                echo "generated=false" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "generated=true" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "⚠️ Music file too small (Size: $FILE_SIZE bytes, expected > 50KB)"
+            echo "generated=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "⚠️ Music not generated"
+          echo "generated=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Commit music
+      if: steps.verify-music.outputs.generated == 'true'
+      run: |
+        git config user.name "${{ env.GIT_USER_NAME }}"
+        git config user.email "${{ env.GIT_USER_EMAIL }}"
+        git add .
+        if git diff --cached --quiet; then
+          echo "No music to commit"
+        else
+          git commit -m "🎵 Add generated background music - Title: ${{ needs.analyze-video.outputs.title }}, Generated at: $(date)"
+          git pull --rebase origin "${{ needs.setup-branch.outputs.branch-name }}"
+          git push
+        fi
+
+  final-verification:
+    runs-on: ubuntu-latest
+    needs: [setup-branch, analyze-video, edit-video, generate-title-image, generate-music]
+    if: needs.analyze-video.outputs.analysis-completed == 'true'
+    outputs:
+      verification-passed: ${{ steps.verify-content.outputs.passed }}
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.setup-branch.outputs.branch-name }}
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install Python dependencies
+      run: |
+        pip install google-generativeai
+        
+    - name: 🔍 最終確認 (Python Script with Gemini Vision)
+      id: final-check
+      env:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      run: |
+        python scripts/verify_content.py \
+          "${{ needs.setup-branch.outputs.folder-name }}" \
+          "$GEMINI_API_KEY"
+             
+    - name: Verify final check results
+      id: verify-content
+      run: |
+        FOLDER_NAME="${{ needs.setup-branch.outputs.folder-name }}"
+        
+        if [ -f "$FOLDER_NAME/verification/final-check.json" ]; then
+          STATUS=$(jq -r '.status' "$FOLDER_NAME/verification/final-check.json")
+          if [ "$STATUS" = "passed" ]; then
+            echo "✅ Final verification passed"
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Final verification found issues"
+            echo "passed=false" >> $GITHUB_OUTPUT
+            
+            # 問題点を表示
+            echo "Issues found:"
+            jq -r '.issues[]' "$FOLDER_NAME/verification/final-check.json" 2>/dev/null || true
+          fi
+        else
+          echo "⚠️ Verification file not found"
+          echo "passed=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Commit verification results
+      run: |
+        git config user.name "${{ env.GIT_USER_NAME }}"
+        git config user.email "${{ env.GIT_USER_EMAIL }}"
+        git add .
+        if git diff --cached --quiet; then
+          echo "No verification files to commit"
+        else
+          git commit -m "🔍 Add final verification results - Status: ${{ steps.verify-content.outputs.passed == 'true' && 'Passed' || 'Issues found' }}, Verified at: $(date)"
+          git pull --rebase origin "${{ needs.setup-branch.outputs.branch-name }}"
+          git push
+        fi
+
+  integrate-final-video:
+    runs-on: ubuntu-latest
+    needs: [setup-branch, analyze-video, edit-video, generate-title-image, generate-music, final-verification]
+    if: needs.analyze-video.outputs.analysis-completed == 'true' && (needs.generate-title-image.outputs.image-generated == 'true' || needs.generate-music.outputs.music-generated == 'true')
+    outputs:
+      final-video-path: ${{ steps.finalize-enhanced.outputs.final-path }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.setup-branch.outputs.branch-name }}
+        
+    - name: Install FFmpeg and Fonts
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg bc
+        # Install Japanese fonts for title rendering
+        sudo apt-get install -y fonts-noto-cjk fonts-ipafont-gothic fonts-ipafont-mincho
+        ffmpeg -version
+        fc-list | grep -i noto || true
+        
+    - name: Generate enhanced video with background and music
+      id: finalize-enhanced
+      run: |
+        FOLDER_NAME="${{ needs.setup-branch.outputs.folder-name }}"
+        
+        # 元のビデオファイル名を取得（パスとextensionを除去）
+        ORIGINAL_VIDEO="${{ needs.analyze-video.outputs.actual-video-path }}"
+        VIDEO_BASENAME=$(basename "$ORIGINAL_VIDEO" | sed 's/\.[^.]*$//')
+        
+        # タイトル情報の読み込み
+        TITLE=$(jq -r '.title' "$FOLDER_NAME/analysis/title.json")
+        DURATION=$(jq -r '.duration' "$FOLDER_NAME/analysis/title.json")
+        FONTSIZE=$(jq -r '.style.fontsize' "$FOLDER_NAME/analysis/title.json")
+        COLOR=$(jq -r '.style.color' "$FOLDER_NAME/analysis/title.json")
+        FONTFILE="${{ env.FONT_FILE }}"
+        
+        # デバッグ用：タイトルの長さを確認
+        echo "Title duration from JSON: $DURATION seconds"
+        
+        # 使用する動画を決定（背景画像があれば強化版、なければ通常版）
+        if [ "${{ needs.generate-title-image.outputs.image-generated }}" = "true" ]; then
+          echo "🖼️ Using enhanced title with background image"
+          
+          # 背景画像を使用したタイトル動画の生成（改善版）
+          # 一時ファイルにタイトルを保存（日本語文字化け対策）
+          echo "$TITLE" > "$FOLDER_NAME/edited-movie/title_text.txt"
+          
+          # 背景画像にフィルターを適用してタイトル動画を生成
+          # textfileを使用して日本語を正しく読み込む
+          RESOLUTION=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${{ needs.analyze-video.outputs.actual-video-path }}")
+          echo "Original video resolution for final integration: $RESOLUTION"
+          # 解像度を幅と高さに分割
+          WIDTH=$(echo $RESOLUTION | cut -d'x' -f1)
+          HEIGHT=$(echo $RESOLUTION | cut -d'x' -f2)
+          
+          ffmpeg -loop 1 -i "$FOLDER_NAME/title-image/background.jpg" -t $DURATION \
+            -vf "scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,pad=${WIDTH}:${HEIGHT}:'(ow-iw)/2':'(oh-ih)/2',
+                 colorchannelmixer=aa=0.7,
+                 boxblur=luma_radius=5:chroma_radius=5:luma_power=1,
+                 curves=all='0/0 0.5/0.3 1/0.8',
+                 drawtext=textfile='$FOLDER_NAME/edited-movie/title_text.txt':
+                          fontfile='$FONTFILE':
+                          fontsize=$((FONTSIZE + 20)):
+                          fontcolor=white:
+                          shadowcolor=black@0.8:
+                          shadowx=3:
+                          shadowy=3:
+                          box=1:
+                          boxcolor=black@0.4:
+                          boxborderw=20:
+                          x=(w-text_w)/2:
+                          y=(h-text_h)/2-30" \
+            -c:v libx264 -pix_fmt yuv420p \
+            "$FOLDER_NAME/edited-movie/title_with_bg.mp4"
+            
+          # オリジナルの動画（タイトルなし）から動画部分を取得
+          # video_with_overlays.mp4を使用（これはタイトルなしの動画）
+          
+          # 新しいタイトルと本編を結合
+          RESOLUTION=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${{ needs.analyze-video.outputs.actual-video-path }}")
+          WIDTH=$(echo $RESOLUTION | cut -d'x' -f1)
+          HEIGHT=$(echo $RESOLUTION | cut -d'x' -f2)
+          ffmpeg -i "$FOLDER_NAME/edited-movie/title_with_bg.mp4" -i "$FOLDER_NAME/edited-movie/video_with_overlays.mp4" \
+            -filter_complex "[1:v]scale=${WIDTH}:${HEIGHT}[v1];[0:v][v1]concat=n=2:v=1:a=0[outv];[1:a]adelay=${DURATION}000|${DURATION}000[outa]" \
+            -map "[outv]" -map "[outa]" \
+            -c:v libx264 -c:a aac -pix_fmt yuv420p \
+            "$FOLDER_NAME/edited-movie/video_enhanced.mp4"
+            
+          VIDEO_FOR_MUSIC="$FOLDER_NAME/edited-movie/video_enhanced.mp4"
+        else
+          echo "📹 Using standard video"
+          VIDEO_FOR_MUSIC="$FOLDER_NAME/edited-movie/basic-edited.mp4"
+        fi
+        
+        # 音楽を追加
+        if [ "${{ needs.generate-music.outputs.music-generated }}" = "true" ]; then
+          echo "🎵 Adding background music"
+          
+          # 動画の長さを取得
+          VIDEO_DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$VIDEO_FOR_MUSIC")
+          echo "Video duration: $VIDEO_DURATION seconds"
+          
+          # 音楽ファイルを探す（mp3またはwav）
+          if [ -f "$FOLDER_NAME/music/background.mp3" ]; then
+            MUSIC_FILE="$FOLDER_NAME/music/background.mp3"
+          elif [ -f "$FOLDER_NAME/music/background.wav" ]; then
+            MUSIC_FILE="$FOLDER_NAME/music/background.wav"
+          else
+            echo "⚠️ Music file not found!"
+            exit 1
+          fi
+          
+          # 音楽をループして動画の長さに合わせる
+          FINAL_OUTPUT="$FOLDER_NAME/edited-movie/${VIDEO_BASENAME}-final-edited.mp4"
+          ffmpeg -stream_loop -1 -i "$MUSIC_FILE" -i "$VIDEO_FOR_MUSIC" \
+            -t $VIDEO_DURATION \
+            -filter_complex "[0:a]volume=0.3[music];[1:a][music]amix=inputs=2:duration=first:dropout_transition=2[aout]" \
+            -map 1:v -map "[aout]" \
+            -c:v copy -c:a aac -shortest \
+            "$FINAL_OUTPUT"
+            
+          echo "✅ Final enhanced video with music generated: ${VIDEO_BASENAME}-final-edited.mp4"
+        else
+          echo "⚠️ No music available, using video without music"
+          FINAL_OUTPUT="$FOLDER_NAME/edited-movie/${VIDEO_BASENAME}-final-edited.mp4"
+          cp "$VIDEO_FOR_MUSIC" "$FINAL_OUTPUT"
+        fi
+        
+        echo "✅ Final video processing completed: ${VIDEO_BASENAME}-final-edited.mp4"
+        echo "final-path=$FINAL_OUTPUT" >> $GITHUB_OUTPUT
+        
+    - name: Commit enhanced video
+      run: |
+        git config user.name "${{ env.GIT_USER_NAME }}"
+        git config user.email "${{ env.GIT_USER_EMAIL }}"
+        git add .
+        if git diff --cached --quiet; then
+          echo "No enhanced video to commit"
+        else
+          git commit -m "🎬 Add enhanced video with title background - Title: ${{ needs.analyze-video.outputs.title }}, Enhanced at: $(date)"
+          git pull --rebase origin "${{ needs.setup-branch.outputs.branch-name }}"
+          git push
+        fi
+
+  create-summary:
+    runs-on: ubuntu-latest
+    needs: [setup-branch, analyze-video, edit-video, generate-title-image, generate-music, final-verification, integrate-final-video]
+    if: always()
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.setup-branch.outputs.branch-name }}
+        
+    - name: Create summary
+      run: |
+        FOLDER_NAME="${{ needs.setup-branch.outputs.folder-name }}"
+        cat > "$FOLDER_NAME/README.md" << EOF
+        # Gemini Video Analysis & Editing Results
+        
+        ## Overview
+        - **Input Video**: ${{ needs.analyze-video.outputs.actual-video-path }}
+        - **Title**: ${{ needs.analyze-video.outputs.title }}
+        - **Processed At**: $(date)
+        - **Branch**: ${{ needs.setup-branch.outputs.branch-name }}
+        
+        ## Generated Content
+        - **Analysis**: \`analysis/\` directory
+          - \`title.json\`: Video title configuration
+          - \`descriptions.json\`: Overlay text configurations
+          - \`text-position.json\`: Unified text position
+          - \`summary.md\`: Analysis report
+        - **Title Image**: \`title-image/\` directory
+          - \`background.jpg\`: AI-generated title background
+          - \`generation-info.json\`: Image generation details
+        - **Music**: \`music/\` directory
+          - \`background.mp3\`: AI-generated background music
+          - \`generation-info.json\`: Music generation details
+        - **Edited Video**: 
+          - \`edited-movie/basic-edited.mp4\`: Basic edited video
+          - \`edited-movie/[original-filename]-final-edited.mp4\`: Enhanced video with AI background and music
+        - **Verification**: \`verification/\` directory
+          - \`final-check.json\`: Verification results
+          - \`report.md\`: Detailed verification report
+        - **Reports**: \`edited-movie/report.md\`, \`README.md\`
+        
+        ## Processing Pipeline
+        1. ✅ Video Analysis: Gemini Vision analyzed content
+        2. ✅ Title Generation: Created opening title screen
+        3. ✅ Text Overlays: Added explanatory text with fade effects
+        4. ✅ Title Image: AI-generated background image (if successful)
+        5. ✅ Music: AI-generated background music (if successful)
+        6. ✅ Final Verification: Content consistency check
+        7. ✅ Enhanced Video: Title with AI background and music
+        8. ✅ Final Edit: Combined all elements
+        EOF
+        
+    - name: Commit summary
+      run: |
+        git config user.name "${{ env.GIT_USER_NAME }}"
+        git config user.email "${{ env.GIT_USER_EMAIL }}"
+        git add .
+        if git diff --cached --quiet; then
+          echo "No summary files to commit"
+        else
+          git commit -m "📝 Add workflow summary"
+          git pull --rebase origin "${{ needs.setup-branch.outputs.branch-name }}"
+          git push
+        fi
+
+  create-pull-request:
+    runs-on: ubuntu-latest
+    needs: [setup-branch, analyze-video, edit-video, generate-title-image, generate-music, final-verification, integrate-final-video, create-summary]
+    if: always()
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.setup-branch.outputs.branch-name }}
+        token: ${{ secrets.PAT_TOKEN || github.token }}
+        
+    - name: Create Pull Request
+      continue-on-error: true
+      run: |
+        gh pr create \
+          --title "🎬 Video Edit: ${{ needs.analyze-video.outputs.title }}" \
+          --body "$(cat <<'EOF'
+        ## Summary
+        Analyzed and edited video with AI-generated title and explanatory overlays.
+        
+        ## Input
+        - **Video**: ${{ needs.analyze-video.outputs.actual-video-path }}
+        - **Custom Title**: ${{ github.event.inputs.edit_title }}
+        
+        ## Processing Pipeline
+        1. 📊 **Analysis**: Gemini Vision analyzed video content
+        2. 🎯 **Title**: Generated/used title "${{ needs.analyze-video.outputs.title }}"
+        3. 📝 **Overlays**: Added explanatory text at key moments
+        4. 🎬 **Edit**: Combined with FFmpeg (fade effects included)
+        
+        ## Generated Files
+        - 📊 Analysis: `analysis/` directory
+        - 🖼️ Title Image: `title-image/` directory
+        - 🎵 Music: `music/` directory
+        - 🎬 Edited Videos: 
+          - `edited-movie/basic-edited.mp4` (standard)
+          - `edited-movie/[original-filename]-final-edited.mp4` (with AI background and music)
+        - 🔍 Verification: `verification/` directory
+        - 📝 Reports: `edited-movie/report.md`, `README.md`
+        
+        ## Workflow Status
+        - ✅ Video Analysis: Completed
+        - ✅ Title Generation: Completed
+        - ✅ Video Editing: Completed with FFmpeg
+        - ${{ needs.generate-title-image.outputs.image-generated == 'true' && '✅' || '⚠️' }} Title Image Generation: ${{ needs.generate-title-image.outputs.image-generated == 'true' && 'Completed' || 'Skipped/Failed' }}
+        - ${{ needs.generate-music.outputs.music-generated == 'true' && '✅' || '⚠️' }} Music Generation: ${{ needs.generate-music.outputs.music-generated == 'true' && 'Completed' || 'Skipped/Failed' }}
+        - ${{ needs.final-verification.outputs.verification-passed == 'true' && '✅' || '⚠️' }} Final Verification: ${{ needs.final-verification.outputs.verification-passed == 'true' && 'Passed' || 'Issues Found' }}
+        - ${{ (needs.generate-title-image.outputs.image-generated == 'true' || needs.generate-music.outputs.music-generated == 'true') && '✅' || '⚠️' }} Enhanced Video: ${{ (needs.generate-title-image.outputs.image-generated == 'true' || needs.generate-music.outputs.music-generated == 'true') && 'Generated' || 'Skipped' }}
+        - ✅ Summary Creation: Completed
+        EOF
+        )" \
+          --head "${{ needs.setup-branch.outputs.branch-name }}" \
+          --base main
+      env:
+        GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        
+    - name: Create PR Summary (No PAT)
+      if: failure()
+      run: |
+        echo "⚠️ Pull Request creation skipped - PAT_TOKEN not configured"
+        echo "To enable automatic PR creation, please add a Personal Access Token with 'repo' and 'pull_request' permissions as PAT_TOKEN in repository secrets."
+        echo ""
+        echo "Branch created: ${{ needs.setup-branch.outputs.branch-name }}"
+        echo "You can manually create a PR from this branch."

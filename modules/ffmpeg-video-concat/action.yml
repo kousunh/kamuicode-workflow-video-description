@@ -1,0 +1,66 @@
+name: 'FFmpeg Video Concatenation'
+description: 'Concatenate videos with proper audio sync using FFmpeg'
+author: 'KamuiCode'
+
+inputs:
+  video1-path:
+    description: '最初の動画ファイルパス（通常はタイトル）'
+    required: true
+  video2-path:
+    description: '2番目の動画ファイルパス（通常は本編）'
+    required: true
+  video1-duration:
+    description: '最初の動画の長さ（秒）- 音声遅延の計算用'
+    required: true
+  output-path:
+    description: '出力ファイルパス'
+    required: true
+
+outputs:
+  video-generated:
+    description: '結合動画生成の成功可否'
+    value: ${{ steps.concat.outputs.success }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Get video resolution
+      id: get-resolution
+      shell: bash
+      run: |
+        # 2番目の動画（本編）の解像度を取得
+        RESOLUTION=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${{ inputs.video2-path }}")
+        echo "resolution=$RESOLUTION" >> $GITHUB_OUTPUT
+        WIDTH=$(echo $RESOLUTION | cut -d'x' -f1)
+        HEIGHT=$(echo $RESOLUTION | cut -d'x' -f2)
+        echo "width=$WIDTH" >> $GITHUB_OUTPUT
+        echo "height=$HEIGHT" >> $GITHUB_OUTPUT
+        
+    - name: Concatenate videos
+      id: concat
+      shell: bash
+      run: |
+        # 音声遅延をミリ秒に変換
+        DELAY_MS=$(echo "${{ inputs.video1-duration }} * 1000" | bc | cut -d. -f1)
+        
+        echo "🎬 Concatenating videos"
+        echo "Resolution: ${{ steps.get-resolution.outputs.resolution }}"
+        echo "Audio delay: ${DELAY_MS}ms"
+        
+        # FFmpegで動画を結合
+        # - 1番目の動画（タイトル）は通常無音
+        # - 2番目の動画（本編）の音声を適切に遅延させる
+        ffmpeg -i "${{ inputs.video1-path }}" -i "${{ inputs.video2-path }}" \
+          -filter_complex "[1:v]scale=${{ steps.get-resolution.outputs.width }}:${{ steps.get-resolution.outputs.height }}[v1];[0:v][v1]concat=n=2:v=1:a=0[outv];[1:a]adelay=${DELAY_MS}|${DELAY_MS}[outa]" \
+          -map "[outv]" -map "[outa]" \
+          -c:v libx264 -c:a aac -pix_fmt yuv420p \
+          "${{ inputs.output-path }}"
+        
+        if [ -f "${{ inputs.output-path }}" ]; then
+          echo "✅ Videos concatenated successfully"
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Video concatenation failed"
+          echo "success=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
