@@ -238,13 +238,11 @@ graph LR
 AI生成機能を無効にすることで、動画分析と基本編集のみを実行：
 - `generate_title_image`: `false`
 - `generate_background_music`: `false`
-→ 約3-5分で完了
 
 ### フルモード（全機能）
 すべての機能を有効にして、AI生成コンテンツを含む高品質な動画を作成：
 - `generate_title_image`: `true`（デフォルト）
 - `generate_background_music`: `true`（デフォルト）
-→ 約10-15分で完了
 
 ## フィードバック
 
