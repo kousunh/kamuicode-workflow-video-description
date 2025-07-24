@@ -1,0 +1,518 @@
+name: Re-Edit Existing Video
+
+on:
+  workflow_dispatch:
+    inputs:
+      text_position:
+        description: 'テキストの表示位置'
+        required: false
+        type: choice
+        default: 'default'
+        options:
+          - 'default'
+          - '左上'
+          - '上'
+          - '右上'
+          - '左下'
+          - '下'
+          - '右下'
+      add_title_image:
+        description: 'タイトル画像を追加する'
+        required: false
+        type: boolean
+        default: false
+      add_background_music:
+        description: '背景音楽を追加する'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  GIT_USER_NAME: "github-actions[bot]"
+  GIT_USER_EMAIL: "github-actions[bot]@users.noreply.github.com"
+  FONT_FILE: "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+
+jobs:
+  find-folder:
+    runs-on: ubuntu-latest
+    outputs:
+      folder-name: ${{ steps.find.outputs.folder-name }}
+      folder-found: ${{ steps.find.outputs.folder-found }}
+      video-path: ${{ steps.find.outputs.video-path }}
+      target-branch: ${{ steps.find.outputs.target-branch }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.find-folder.outputs.target-branch || github.ref_name }}
+        fetch-depth: 0  # すべてのブランチ情報を取得
+        
+    - name: Find latest movie-edit folder
+      id: find
+      run: |
+        echo "🔍 Finding movie-edit folders in branch: ${{ github.ref_name }}"
+        
+        # Find all movie-edit-* folders and sort by timestamp
+        FOLDERS=$(ls -d movie-edit-* 2>/dev/null | sort -r)
+        
+        if [ -z "$FOLDERS" ]; then
+          echo "❌ No movie-edit folders found in current branch: ${{ github.ref_name }}"
+          
+          # mainブランチの場合のみ、他のブランチを探す
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "🔍 Main branch selected but no folders found. Searching for latest video-edit-* branch..."
+            
+            # すべてのブランチを取得
+            git fetch --all
+            
+            # video-edit-*ブランチを時間順にソート（最新が先頭）
+            LATEST_VIDEO_BRANCH=$(git branch -r --sort=-committerdate | grep 'origin/video-edit-' | head -1 | sed 's/.*origin\///')
+            
+            if [ -z "$LATEST_VIDEO_BRANCH" ]; then
+              echo "❌ No video-edit-* branches found"
+              echo "folder-found=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            
+            echo "✅ Found latest video-edit branch: $LATEST_VIDEO_BRANCH"
+            
+            # そのブランチをチェックアウト
+            git checkout "$LATEST_VIDEO_BRANCH"
+            
+            # 再度フォルダを探す
+            FOLDERS=$(ls -d movie-edit-* 2>/dev/null | sort -r)
+            
+            if [ -z "$FOLDERS" ]; then
+              echo "❌ No movie-edit folders found even in $LATEST_VIDEO_BRANCH"
+              echo "folder-found=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            
+            # ターゲットブランチを設定
+            echo "target-branch=$LATEST_VIDEO_BRANCH" >> $GITHUB_OUTPUT
+          else
+            # main以外のブランチでフォルダが見つからない場合は終了
+            echo "❌ No movie-edit folders found in branch ${{ github.ref_name }} (not searching other branches)"
+            echo "folder-found=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+        else
+          # 現在のブランチをターゲットブランチとして設定
+          echo "target-branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+        fi
+        
+        echo "📋 Found folders:"
+        echo "$FOLDERS"
+        
+        # Get the most recent folder (already sorted in reverse order by timestamp)
+        LATEST_FOLDER=$(echo "$FOLDERS" | head -1)
+        echo "✅ Using most recent folder: $LATEST_FOLDER"
+        
+        # Extract timestamp from folder name for display
+        TIMESTAMP=$(echo "$LATEST_FOLDER" | grep -oP '\d{8}-\d{6}')
+        if [ -n "$TIMESTAMP" ]; then
+          # Convert to Japanese time format for display
+          YEAR=${TIMESTAMP:0:4}
+          MONTH=${TIMESTAMP:4:2}
+          DAY=${TIMESTAMP:6:2}
+          HOUR=${TIMESTAMP:9:2}
+          MIN=${TIMESTAMP:11:2}
+          SEC=${TIMESTAMP:13:2}
+          echo "📅 Folder timestamp: ${YEAR}年${MONTH}月${DAY}日 ${HOUR}:${MIN}:${SEC} (JST)"
+        fi
+        
+        # Find the original video path from report
+        echo "🔍 Looking for report files in: $LATEST_FOLDER/work-in-progress/"
+        
+        # Check for both report.md and re-edit-report.md
+        REPORT_FILE=""
+        if [ -f "$LATEST_FOLDER/work-in-progress/report.md" ]; then
+          REPORT_FILE="$LATEST_FOLDER/work-in-progress/report.md"
+          echo "✅ Found report.md"
+        elif [ -f "$LATEST_FOLDER/work-in-progress/re-edit-report.md" ]; then
+          REPORT_FILE="$LATEST_FOLDER/work-in-progress/re-edit-report.md"
+          echo "✅ Found re-edit-report.md"
+        fi
+        
+        if [ -n "$REPORT_FILE" ]; then
+          cat "$REPORT_FILE"
+          # Extract video path from report
+          VIDEO_PATH=$(grep -oP '\*\*元動画\*\*: \K[^\s]+' "$REPORT_FILE" | head -1 || echo "")
+          echo "📄 Extracted video path: $VIDEO_PATH"
+        else
+          echo "❌ No report file found"
+          # Check what files exist in the folder
+          echo "📁 Contents of $LATEST_FOLDER:"
+          ls -la "$LATEST_FOLDER/" || echo "Folder not accessible"
+          if [ -d "$LATEST_FOLDER/work-in-progress" ]; then
+            echo "📁 Contents of work-in-progress:"
+            ls -la "$LATEST_FOLDER/work-in-progress/" || echo "work-in-progress not accessible"
+          fi
+          if [ -d "$LATEST_FOLDER/analysis" ]; then
+            echo "📁 Contents of analysis:"
+            ls -la "$LATEST_FOLDER/analysis/" || echo "analysis not accessible"
+          fi
+        fi
+        
+        # Fallback: check git commit messages
+        if [ -z "$VIDEO_PATH" ]; then
+          VIDEO_PATH=$(git log --oneline -n 50 | grep -oP 'Video: \K[^,]+' | head -1 || echo "")
+          if [ -n "$VIDEO_PATH" ]; then
+            echo "📝 Found video path in git log: $VIDEO_PATH"
+          fi
+        fi
+        
+        # Fallback: find in videos directory
+        if [ -z "$VIDEO_PATH" ] || [ ! -f "$VIDEO_PATH" ]; then
+          echo "⚠️ Could not find original video path, searching in videos directory..."
+          VIDEO_PATH=$(find videos -name "*.mp4" -type f | head -1)
+          if [ -z "$VIDEO_PATH" ]; then
+            echo "❌ No video file found in videos directory"
+            exit 1
+          fi
+        fi
+        
+        echo "📹 Video path: $VIDEO_PATH"
+        
+        echo "folder-name=$LATEST_FOLDER" >> $GITHUB_OUTPUT
+        echo "folder-found=true" >> $GITHUB_OUTPUT
+        echo "video-path=$VIDEO_PATH" >> $GITHUB_OUTPUT
+
+  edit-video:
+    runs-on: ubuntu-latest
+    needs: find-folder
+    if: needs.find-folder.outputs.folder-found == 'true'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.find-folder.outputs.target-branch || github.ref_name }}
+        
+    - name: Clean existing directories
+      run: |
+        FOLDER_NAME="${{ needs.find-folder.outputs.folder-name }}"
+        echo "🧹 Cleaning existing directories in $FOLDER_NAME..."
+        
+        # Clean work-in-progress directory
+        if [ -d "$FOLDER_NAME/work-in-progress" ]; then
+          echo "Removing work-in-progress directory..."
+          rm -rf "$FOLDER_NAME/work-in-progress"
+        fi
+        
+        # Clean final-output directory
+        if [ -d "$FOLDER_NAME/final-output" ]; then
+          echo "Removing final-output directory..."
+          rm -rf "$FOLDER_NAME/final-output"
+        fi
+        
+        # Recreate directories
+        mkdir -p "$FOLDER_NAME/work-in-progress"
+        mkdir -p "$FOLDER_NAME/final-output"
+        echo "✅ Directories cleaned and recreated"
+        
+    - name: Install FFmpeg and Fonts
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+        sudo apt-get install -y fonts-noto-cjk fonts-ipafont-gothic fonts-ipafont-mincho
+        ffmpeg -version
+        
+    - name: Get video resolution
+      id: video-res
+      run: |
+        VIDEO_PATH="${{ needs.find-folder.outputs.video-path }}"
+        if [ -f "$VIDEO_PATH" ]; then
+          RESOLUTION=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "$VIDEO_PATH")
+          echo "video_resolution=$RESOLUTION" >> $GITHUB_OUTPUT
+          echo "Original video resolution: $RESOLUTION"
+        else
+          echo "⚠️ Video file not found, using default resolution"
+          echo "video_resolution=1920x1080" >> $GITHUB_OUTPUT
+        fi
+
+
+    - name: Update text position if specified
+      if: github.event.inputs.text_position != 'default' && github.event.inputs.text_position != ''
+      run: |
+        FOLDER_NAME="${{ needs.find-folder.outputs.folder-name }}"
+        TEXT_POSITION="${{ github.event.inputs.text_position }}"
+        
+        # テキスト位置の決定
+        case "$TEXT_POSITION" in
+          "左上") POSITION="top-left" ;;
+          "上") POSITION="top-center" ;;
+          "右上") POSITION="top-right" ;;
+          "左下") POSITION="bottom-left" ;;
+          "下") POSITION="bottom-center" ;;
+          "右下") POSITION="bottom-right" ;;
+          *) POSITION="$TEXT_POSITION" ;;
+        esac
+        
+        echo "📍 Updating text position to: $POSITION"
+        
+        # 既存のdescriptions.jsonを読み込んで位置を更新
+        if [ -f "$FOLDER_NAME/analysis/descriptions.json" ]; then
+          jq --arg pos "$POSITION" 'map(.position = $pos)' "$FOLDER_NAME/analysis/descriptions.json" > "$FOLDER_NAME/analysis/descriptions_temp.json"
+          mv "$FOLDER_NAME/analysis/descriptions_temp.json" "$FOLDER_NAME/analysis/descriptions.json"
+          echo "✅ Updated all text positions to: $POSITION"
+        fi
+
+
+    - name: Read title data
+      id: read-title
+      run: |
+        FOLDER_NAME="${{ needs.find-folder.outputs.folder-name }}"
+        TITLE_DATA=$(cat "$FOLDER_NAME/analysis/title.json")
+        echo "title-data<<EOF" >> $GITHUB_OUTPUT
+        echo "$TITLE_DATA" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Generate title video from existing image
+      if: github.event.inputs.add_title_image == 'true'
+      uses: ./modules/ffmpeg-title-generator
+      with:
+        title: ${{ fromJson(steps.read-title.outputs.title-data).title }}
+        duration: ${{ fromJson(steps.read-title.outputs.title-data).duration }}
+        resolution: ${{ steps.video-res.outputs.video_resolution }}
+        fontsize: ${{ fromJson(steps.read-title.outputs.title-data).style.fontsize }}
+        color: ${{ fromJson(steps.read-title.outputs.title-data).style.color }}
+        bgcolor: ${{ fromJson(steps.read-title.outputs.title-data).style.bgcolor }}
+        fontfile: ${{ env.FONT_FILE }}
+        background-image: ${{ needs.find-folder.outputs.folder-name }}/title-image/background.jpg
+        output-path: ${{ needs.find-folder.outputs.folder-name }}/work-in-progress/title.mp4
+        
+    - name: Apply text overlays
+      uses: ./modules/ffmpeg-text-overlay
+      with:
+        video-path: ${{ needs.find-folder.outputs.video-path }}
+        descriptions-json: ${{ needs.find-folder.outputs.folder-name }}/analysis/descriptions.json
+        fontfile: ${{ env.FONT_FILE }}
+        output-path: ${{ needs.find-folder.outputs.folder-name }}/work-in-progress/video_with_overlays.mp4
+        
+    - name: Process video based on options
+      run: |
+        FOLDER_NAME="${{ needs.find-folder.outputs.folder-name }}"
+        
+        # タイトル画像も音楽も追加しない場合のみ、final-outputに移動
+        if [ "${{ github.event.inputs.add_title_image }}" != "true" ] && [ "${{ github.event.inputs.add_background_music }}" != "true" ]; then
+          echo "📝 No title or music requested - moving to final output"
+          cp "$FOLDER_NAME/work-in-progress/video_with_overlays.mp4" "$FOLDER_NAME/final-output/final-edited.mp4"
+          echo "✅ Moved video_with_overlays.mp4 to final-output/final-edited.mp4"
+        else
+          echo "🎬 Title or music requested - keeping in work-in-progress for further processing"
+          # video_with_overlays.mp4はそのままwork-in-progressに残す
+        fi
+        
+    - name: Create report
+      run: |
+        FOLDER_NAME="${{ needs.find-folder.outputs.folder-name }}"
+        TITLE=$(jq -r '.title' "$FOLDER_NAME/analysis/title.json")
+        
+        cat > "$FOLDER_NAME/work-in-progress/re-edit-report.md" << EOF
+        # 動画再編集レポート
+        
+        ## 編集内容
+        - **元動画**: ${{ needs.find-folder.outputs.video-path }}
+        - **タイトル**: $TITLE
+        - **再編集日時**: $(TZ=Asia/Tokyo date)
+        - **使用ブランチ**: ${{ needs.find-folder.outputs.target-branch || github.ref_name }}
+        
+        ## 変更内容
+        - テキスト位置: ${{ github.event.inputs.text_position }}
+        - タイトル画像追加: ${{ github.event.inputs.add_title_image && 'あり' || 'なし' }}
+        - 背景音楽追加: ${{ github.event.inputs.add_background_music && 'あり' || 'なし' }}
+        
+        ## 出力ファイル
+        - 最終動画: \`final-output/final-edited.mp4\`
+        EOF
+        
+    - name: Commit re-edited video
+      run: |
+        git config user.name "${{ env.GIT_USER_NAME }}"
+        git config user.email "${{ env.GIT_USER_EMAIL }}"
+        git add --all
+        git commit -m "🔄 Re-edit video - Branch: ${{ needs.find-folder.outputs.target-branch || github.ref_name }}, Re-edited at: $(TZ=Asia/Tokyo date)"
+        git push
+
+  integrate-final-video:
+    runs-on: ubuntu-latest
+    needs: [find-folder, edit-video]
+    if: |
+      always() && 
+      needs.find-folder.outputs.folder-found == 'true' &&
+      needs.edit-video.result == 'success' &&
+      (github.event.inputs.add_title_image == 'true' || github.event.inputs.add_background_music == 'true')
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.find-folder.outputs.target-branch || github.ref_name }}
+        
+    - name: Install FFmpeg and Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg jq fonts-noto-cjk
+        
+    - name: Check existing assets and prepare integration
+      id: check-assets
+      run: |
+        FOLDER_NAME="${{ needs.find-folder.outputs.folder-name }}"
+        
+        # アセットの存在を確認
+        HAS_TITLE_IMAGE="false"
+        HAS_MUSIC="false"
+        
+        if [ -f "$FOLDER_NAME/title-image/background.jpg" ]; then
+          echo "✅ Found title background image"
+          HAS_TITLE_IMAGE="true"
+        else
+          echo "❌ No title background image found"
+        fi
+        
+        if [ -f "$FOLDER_NAME/music/background.wav" ]; then
+          echo "✅ Found background music"
+          HAS_MUSIC="true"
+        else
+          echo "❌ No background music found"
+        fi
+        
+        # Check if title video was already created in edit-video job
+        if [ "${{ github.event.inputs.add_title_image }}" = "true" ] && [ "$HAS_TITLE_IMAGE" = "true" ]; then
+          if [ -f "$FOLDER_NAME/work-in-progress/title.mp4" ]; then
+            echo "✅ Title video already exists from edit-video job"
+          else
+            echo "⚠️ Title video not found, but title image exists"
+          fi
+        fi
+        
+        # タイトルデータを取得
+        if [ -f "$FOLDER_NAME/analysis/title.json" ]; then
+          TITLE_DATA=$(cat "$FOLDER_NAME/analysis/title.json")
+          echo "title-data<<EOF" >> $GITHUB_OUTPUT
+          echo "$TITLE_DATA" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        fi
+        
+        # ビデオ解像度を取得
+        VIDEO_PATH="${{ needs.find-folder.outputs.video-path }}"
+        if [ -f "$VIDEO_PATH" ]; then
+          RESOLUTION=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "$VIDEO_PATH")
+        else
+          RESOLUTION="1920x1080"
+        fi
+        
+        echo "has-title-image=$HAS_TITLE_IMAGE" >> $GITHUB_OUTPUT
+        echo "has-music=$HAS_MUSIC" >> $GITHUB_OUTPUT
+        echo "video-resolution=$RESOLUTION" >> $GITHUB_OUTPUT
+        
+    - name: Add title if requested
+      if: github.event.inputs.add_title_image == 'true' && steps.check-assets.outputs.has-title-image == 'true'
+      uses: ./modules/ffmpeg-video-concat
+      with:
+        video1-path: ${{ needs.find-folder.outputs.folder-name }}/work-in-progress/title.mp4
+        video2-path: ${{ needs.find-folder.outputs.folder-name }}/work-in-progress/video_with_overlays.mp4
+        video1-duration: ${{ fromJson(steps.check-assets.outputs.title-data).duration }}
+        output-path: ${{ needs.find-folder.outputs.folder-name }}/work-in-progress/video_with_title.mp4
+        
+    - name: Determine video path for music
+      id: video-path
+      run: |
+        FOLDER_NAME="${{ needs.find-folder.outputs.folder-name }}"
+        
+        # タイトルが追加されていればそれを使用、なければオーバーレイのみの動画を使用
+        if [ -f "$FOLDER_NAME/work-in-progress/video_with_title.mp4" ]; then
+          echo "video-path=$FOLDER_NAME/work-in-progress/video_with_title.mp4" >> $GITHUB_OUTPUT
+        else
+          echo "video-path=$FOLDER_NAME/work-in-progress/video_with_overlays.mp4" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Add music if requested
+      if: github.event.inputs.add_background_music == 'true' && steps.check-assets.outputs.has-music == 'true'
+      uses: ./modules/ffmpeg-add-music
+      with:
+        video-path: ${{ steps.video-path.outputs.video-path }}
+        music-path: ${{ needs.find-folder.outputs.folder-name }}/music/background.wav
+        volume: '0.3'
+        output-path: ${{ needs.find-folder.outputs.folder-name }}/work-in-progress/final-edited.mp4
+        
+        
+    - name: Move final video to output directory
+      run: |
+        FOLDER_NAME="${{ needs.find-folder.outputs.folder-name }}"
+        mkdir -p "$FOLDER_NAME/final-output"
+        
+        # 最終的なビデオファイルを特定して移動
+        if [ -f "$FOLDER_NAME/work-in-progress/final-edited.mp4" ]; then
+          # 音楽が追加された場合
+          mv "$FOLDER_NAME/work-in-progress/final-edited.mp4" "$FOLDER_NAME/final-output/"
+          echo "✅ Final video with music moved to final-output directory"
+        elif [ -f "$FOLDER_NAME/work-in-progress/video_with_title.mp4" ]; then
+          # タイトルのみ追加された場合
+          mv "$FOLDER_NAME/work-in-progress/video_with_title.mp4" "$FOLDER_NAME/final-output/final-edited.mp4"
+          echo "✅ Video with title moved to final-output directory"
+        elif [ -f "$FOLDER_NAME/work-in-progress/video_with_overlays.mp4" ]; then
+          # 何も追加されていない場合（これは通常edit-videoジョブで処理される）
+          echo "⚠️ No enhancements were added, video should have been moved in edit-video job"
+        else
+          echo "❌ No video file found!"
+          exit 1
+        fi
+        
+    - name: Final commit
+      run: |
+        git config user.name "${{ env.GIT_USER_NAME }}"
+        git config user.email "${{ env.GIT_USER_EMAIL }}"
+        git add --all -- ':!.gemini/'
+        if git diff --cached --quiet; then
+          echo "No final changes to commit"
+        else
+          git commit -m "✨ Complete re-edit with enhanced assets - Re-edited at: $(TZ=Asia/Tokyo date)"
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push
+        fi
+
+  create-pull-request:
+    runs-on: ubuntu-latest
+    needs: [find-folder, edit-video, integrate-final-video]
+    if: needs.find-folder.outputs.folder-found == 'true' && always()
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.ref_name }}
+        token: ${{ secrets.PAT_TOKEN || github.token }}
+        
+    - name: Create Pull Request
+      continue-on-error: true
+      run: |
+        gh pr create \
+          --title "🔄 Re-Edit: ${{ needs.find-folder.outputs.target-branch || github.ref_name }}" \
+          --body "$(cat <<'EOF'
+        ## Summary
+        Re-edited existing video from branch: ${{ needs.find-folder.outputs.target-branch || github.ref_name }}
+        
+        ## Changes
+        - Text Position: ${{ github.event.inputs.text_position }}
+        - Add Title Image: ${{ github.event.inputs.add_title_image }}
+        - Add Background Music: ${{ github.event.inputs.add_background_music }}
+        
+        ## Files
+        - 🎬 Re-edited Video: `${{ needs.find-folder.outputs.folder-name }}/final-output/final-edited.mp4`
+        - 📝 Report: `${{ needs.find-folder.outputs.folder-name }}/work-in-progress/re-edit-report.md`
+        
+        ## Original Info
+        - Original Video: ${{ needs.find-folder.outputs.video-path }}
+        - Folder: ${{ needs.find-folder.outputs.folder-name }}
+        - Re-edited at: $(TZ=Asia/Tokyo date)
+        EOF
+        )" \
+          --head "${{ needs.find-folder.outputs.target-branch || github.ref_name }}" \
+          --base main
+      env:
+        GH_TOKEN: ${{ secrets.PAT_TOKEN }}

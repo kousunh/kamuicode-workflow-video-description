@@ -23,13 +23,16 @@
 ```mermaid
 graph LR
     A[ブランチセットアップ] --> B[動画分析]
-    B --> C[タイトル画像生成]
-    B --> D[音楽生成]
-    B --> E[動画編集]
-    E --> F[最終検証]
-    F --> G[最終動画統合]
-    G --> H[プルリクエスト作成]
+    B --> C[動画編集]
+    B --> D[タイトル画像生成*]
+    B --> E[音楽生成*]
+    C --> F[最終動画統合]
+    D --> F
+    E --> F
+    F --> G[プルリクエスト作成]
 ```
+
+*オプション機能（有効/無効を選択可能）
 
 ## 必要な設定
 
@@ -112,9 +115,16 @@ your-repository/
 | `video_path` | 分析対象の動画ファイルパス | ✅ | `auto-select` |
 | `edit_title` | カスタムタイトル（省略時は自動生成） | ❌ | - |
 | `description_prompt` | 説明文生成時の追加指示 | ❌ | - |
+| `text_position` | テキストの表示位置 | ❌ | `auto` |
+| `generate_title_image` | AI背景画像を生成してタイトル画面に使用 | ❌ | `true` |
+| `generate_background_music` | AI背景音楽を生成して追加 | ❌ | `true` |
 
 ### video_pathの特殊値
 - `auto-select`: videosディレクトリ内の最新の動画を自動選択
+
+### text_positionの選択肢
+- `auto`: 自動選択（デフォルト）
+- `左上`、`上`、`右上`、`左下`、`下`、`右下`: 指定位置に表示
 
 ## 生成される成果物
 
@@ -127,17 +137,17 @@ movie-edit-YYYYMMDD-HHMMSS/
 │   ├── descriptions.json   # 説明文リスト
 │   ├── text-position.json  # テキスト表示位置
 │   └── summary.md         # 分析レポート
-├── edited-movie/
-│   ├── basic-edited.mp4   # 基本編集版
-│   ├── [元ファイル名]-final-edited.mp4  # 最終版
+├── work-in-progress/
+│   ├── title.mp4          # タイトル動画
+│   ├── video_with_overlays.mp4  # テキストオーバーレイ追加版
+│   ├── basic-edited.mp4   # 基本編集版（タイトル＋本編）
 │   └── report.md          # 編集レポート
-├── title-image/
+├── final-output/
+│   └── [元ファイル名]-final-edited.mp4  # 最終版
+├── title-image/            # （オプション）
 │   └── background.jpg     # AI生成タイトル背景画像
-├── music/
+├── music/                  # （オプション）
 │   └── background.wav     # AI生成音楽
-├── verification/
-│   ├── final-check.json   # 検証結果
-│   └── report.md          # 検証レポート
 └── README.md              # 処理サマリー
 ```
 
@@ -145,37 +155,71 @@ movie-edit-YYYYMMDD-HHMMSS/
 
 1. **動画分析**: Gemini Vision APIで動画を分析し、タイトルと説明文を生成
 2. **基本編集**: FFmpegでタイトル画面と説明文オーバーレイを追加
-3. **タイトル背景画像生成**: タイトル画面用のAI背景画像を生成
-4. **背景音楽生成**: 動画内容に基づいた背景音楽を生成
-5. **最終検証**: 生成されたコンテンツの整合性をチェック
-6. **統合**: 全要素を組み合わせて最終版を作成
-7. **PR作成**: 処理結果を含むプルリクエストを自動作成
+3. **拡張機能（オプション）**:
+   - **タイトル背景画像生成**: AI（Imagen4）でタイトル画面用の背景画像を生成
+   - **背景音楽生成**: AI（Google Lyria）で動画内容に基づいた背景音楽を生成
+4. **最終統合**: 選択された要素を組み合わせて最終版を作成
+5. **PR作成**: 処理結果を含むプルリクエストを自動作成
+
+## Re-Edit Video ワークフロー
+
+既存の編集済み動画を再編集するためのワークフローです。`video-text-enhancer.yml`で生成されたブランチ内のフォルダにある分析結果（analysis/）、タイトル画像（title-image/）、背景音楽（music/）を活用して、最終動画を再編集できます。
+
+### ワークフローの流れ
+
+```mermaid
+graph LR
+    A[フォルダ検索] --> B[動画再編集]
+    B --> C[画像・音楽統合*]
+    C --> D[プルリクエスト作成]
+```
+
+*タイトル画像・背景音楽の追加時のみ実行
+
+### 機能
+- 既存のmovie-editフォルダから動画を検出
+- mainブランチで見つからない場合は最新のvideo-editブランチを自動検索
+- テキスト位置の変更（default、左上、上、右上、左下、下、右下）
+- 既存のタイトル画像・音楽アセットを使用した統合
+
+### 使用方法
+
+1. **Actions タブから実行**
+   - 「Re-Edit Existing Video」を選択
+   - 「Run workflow」をクリック
+   - **重要**: ワークフロー実行時に必ず編集したいブランチを選択してください
+   - mainブランチで実行した場合は、video-editフォルダのタイムスタンプが一番新しいフォルダを編集します
+
+2. **入力パラメータ**
+   - `text_position`: テキストの表示位置を変更（デフォルト: default）
+   - `add_title_image`: 既存のタイトル画像を使用（チェックボックス）
+   - `add_background_music`: 既存の背景音楽を使用（チェックボックス）
+
+3. **動作**
+   - 最新のmovie-editフォルダを自動検出
+   - アセットの存在を確認し、利用可能なものだけを統合
+   - チェックボックスがオフの場合はテキストオーバーレイのみ
 
 ## カスタマイズ
 
-### フォント設定
-ワークフロー内の`FONT_FILE`環境変数でフォントファイルを指定できます：
-```yaml
-env:
-  FONT_FILE: "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
-```
+### タイトル・説明テキストの設定
+タイトルや説明テキストのスタイル（フォントサイズ、色、背景色など）は、settingsディレクトリで管理されています。
+詳細は[settings/ffmpeg-settings-readme.md](settings/ffmpeg-settings-readme.md)を参照してください。
 
-### テキストスタイル
-`analyze_video.py`内の`TITLE_STYLE`定数で調整できます：
-```python
-TITLE_STYLE = {
-    "fontsize": 72,
-    "color": "white",
-    "bgcolor": "black@0.8",
-    "fontfile": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
-}
-```
+### プロンプトの設定
+動画分析やAI生成に使用するプロンプトも、settingsディレクトリで管理されています：
+- **動画分析プロンプト**: `settings/video-analysis-prompts.md`
+- **画像生成プロンプト**: `settings/image-generation-prompt.md`
+- **音楽生成プロンプト**: `settings/music-generation-prompt.md`
+
+これらのファイルを編集することで、AI生成の挙動をカスタマイズできます。
 
 ## 注意事項
 
-- 大きな動画ファイル（50MB以上）は処理に時間がかかります
 - 日本語テキストの表示には適切なフォントが必要です
-- GitHub Actionsの実行時間制限（6時間）に注意してください
+- 動画ファイルサイズに注意してください（GitHubの最大ファイルサイズは100MB）
+- **重要**: `video-text-enhancer.yml`で出力された成果品の一部を削除・リネームすると、Re-Edit Videoワークフローが動かなくなる可能性があります
+- 自分のタイトル画像や音楽を使用したい場合は、同じ名前（`title-image/background.jpg`、`music/background.wav`）で差し替えてください
 
 ## トラブルシューティング
 
@@ -183,32 +227,28 @@ TITLE_STYLE = {
 - `workflow_dispatch`イベントなので、手動実行が必要です
 - Actionsタブから手動で実行してください
 
-### 文字化けする
-- 日本語フォントがインストールされているか確認
-- `fonts-noto-cjk`パッケージがインストールされます
+### 画像・音楽が生成されない
+- ワークフローの画像・音楽生成ジョブの詳細ログを確認してください
+- Gemini CLI Actionのレートリミットで止まっている可能性があります
+- GitHub Secretsの`T2I_FAL_IMAGEN4_FAST_URL`と`T2M_GOOGLE_LYRIA_URL`が正しく設定されているか確認してください
+
+## ワークフローの動作モード
+
+### 基本モード（高速処理）
+AI生成機能を無効にすることで、動画分析と基本編集のみを実行：
+- `generate_title_image`: `false`
+- `generate_background_music`: `false`
+→ 約3-5分で完了
+
+### フルモード（全機能）
+すべての機能を有効にして、AI生成コンテンツを含む高品質な動画を作成：
+- `generate_title_image`: `true`（デフォルト）
+- `generate_background_music`: `true`（デフォルト）
+→ 約10-15分で完了
 
 ## フィードバック
 
-ワークフローに問題があればissueなど頂けるとありがたいです。
-
-## 改変・利用について
-
-このワークフローには実用面での改善の余地がまだ多くあります。自由に改変していただき、有用な部分があればぜひご活用ください。
-
-## 検討課題
-
-以下は私が検討している改善点の一例です。
-
-### テキスト表示のカスタマイズ
-現在、テキストの表示設定（フォント、サイズ、フェード効果、表示位置など）はコード内のFFmpegパラメータで制御しています。これらの設定は用途に応じて、コードを直接編集することで自由にカスタマイズできます。
-
-テキストの表示位置については、現在Gemini AIが動画内容を分析して最適な位置（左上・上・右上・左下・下・右下）を自動判定していますが、ユーザーが直接指定できるオプションを追加することで、より柔軟な運用が可能になるかもしれません。
-
-### 成果物の管理方法
-現在のワークフローでは、処理の途中経過を含むすべての成果物がブランチに保存される仕様になっています。ストレージの効率化を図るため、最終成果物のみを残し、中間ファイルを自動削除するのも検討していました。
-
-### Claude Code SDKへの差し替え
-KAMUICODEの画像生成や音楽生成部分はGemini CLI Actionを利用しているものの、Claude Code SDKに差し替えられます。
+ワークフローが途中で止まる、挙動がおかしいなど、気づいた点がございましたら是非issueなど頂きたいです。
 
 ## ライセンス
 

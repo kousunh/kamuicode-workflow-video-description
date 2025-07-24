@@ -26,7 +26,10 @@ cd kamuicode-workflow-video-description
 クローン後のディレクトリ構成：
 ```
 kamuicode-workflow-video-description/
-├── video-text-enhancer.yml    # ワークフローファイル
+├── .github/
+│   └── workflows/
+│       ├── video-text-enhancer.yml    # メインワークフローファイル
+│       └── re-edit-video.yml          # 再編集ワークフローファイル
 ├── scripts/
 │   └── gemini_analyzer.py    # 汎用動画/画像分析スクリプト
 ├── modules/
@@ -36,11 +39,15 @@ kamuicode-workflow-video-description/
 │   ├── ffmpeg-video-concat/  # 動画結合モジュール
 │   ├── gemini-cli-music-generator/  # AI音楽生成モジュール
 │   └── gemini-cli-title-image-generator/  # AI画像生成モジュール
+├── settings/                  # 各種設定ファイル
+│   ├── ffmpeg-settings-readme.md  # FFmpeg設定説明
+│   ├── video-analysis-prompts.md  # 動画分析プロンプト
+│   ├── image-generation-prompt.md # 画像生成プロンプト
+│   └── music-generation-prompt.md # 音楽生成プロンプト
 ├── videos/
 │   └── README.md             # 動画ディレクトリの説明
 ├── README.md
 ├── SETUP.md
-├── module.md                 # モジュール詳細説明
 └── LICENSE
 ```
 
@@ -48,11 +55,9 @@ kamuicode-workflow-video-description/
 自分のリポジトリにワークフローを設定する場合：
 
 ```bash
-# ワークフローディレクトリを作成
-mkdir -p .github/workflows
-
-# ワークフローファイルをコピー
-cp video-text-enhancer.yml .github/workflows/
+# ワークフローファイルがすでに.github/workflowsにある場合はコピー不要
+# video-text-enhancer.yml: メインの動画編集ワークフロー
+# re-edit-video.yml: 既存動画の再編集ワークフロー
 
 # サンプル動画を配置（任意）
 cp your-video.mp4 videos/
@@ -167,7 +172,9 @@ git push origin main
      - `auto-select`（最新の動画を自動選択）
      - または具体的なパス（例：`videos/sample.mp4`）
    - **edit_title**: カスタムタイトル（オプション）
-   - **description_prompt**: 説明文生成の追加指示（オプション）
+   - **text_position**: テキスト表示位置（auto/左上/上/右上/左下/下/右下）
+   - **generate_title_image**: AI背景画像生成（true/false、デフォルトtrue）
+   - **generate_background_music**: AI背景音楽生成（true/false、デフォルトtrue）
 5. 「Run workflow」をクリックして実行
 
 ## ステップ6: 結果の確認
@@ -191,6 +198,55 @@ A: `videos/`ディレクトリに動画ファイルが存在することを確�
 
 ### Q: Gemini APIキーのエラーが出る
 A: APIキーが正しく設定されているか、API制限に達していないか確認してください。
+
+### Q: AI画像/音楽生成がエラーになる
+A: GitHub Secretsに`T2I_FAL_IMAGEN4_FAST_URL`と`T2M_GOOGLE_LYRIA_URL`が正しく設定されているか確認してください。
+
+### Q: 高速に処理したい
+A: AI生成機能を無効にしてください（`generate_title_image`と`generate_background_music`を`false`に設定）。
+
+## Re-Edit Video ワークフローの使用方法
+
+### 概要
+既存の編集済み動画を再編集するためのワークフローです。`video-text-enhancer.yml`で生成されたブランチ内のフォルダにある分析結果、タイトル画像、背景音楽を活用して、最終動画を再編集できます。
+
+### 実行手順
+1. GitHubリポジトリの「Actions」タブを開く
+2. 左サイドバーから「Re-Edit Existing Video」を選択
+3. 「Run workflow」ボタンをクリック
+4. パラメータを入力：
+   - **text_position**: テキスト表示位置（default/左上/上/右上/左下/下/右下）
+   - **add_title_image**: 既存のタイトル画像を使用（チェックボックス）
+   - **add_background_music**: 既存の背景音楽を使用（チェックボックス）
+5. 「Run workflow」をクリックして実行
+
+### 動作の詳細
+- 最新のmovie-editフォルダを自動検出
+- mainブランチでフォルダが見つからない場合、最新のvideo-editブランチを自動検索
+- 既存のreport.mdまたはre-edit-report.mdからビデオ情報を読み取り
+- 選択されたオプションに基づいて動画を再編集
+
+## カスタマイズ設定
+
+### FFmpeg設定
+タイトルや説明テキストのスタイル設定は、`settings/ffmpeg-settings-readme.md`を参照してください。
+
+### プロンプト設定
+各種AI生成のプロンプトは以下のファイルで管理されています：
+- **動画分析**: `settings/video-analysis-prompts.md`
+- **画像生成**: `settings/image-generation-prompt.md`
+- **音楽生成**: `settings/music-generation-prompt.md`
+
+## トラブルシューティング
+
+### 画像・音楽が生成されない
+- ワークフローの画像・音楽生成ジョブの詳細ログを確認してください
+- Gemini CLI Actionのレートリミットで止まっている可能性があります
+- GitHub Secretsの`T2I_FAL_IMAGEN4_FAST_URL`と`T2M_GOOGLE_LYRIA_URL`が正しく設定されているか確認してください
+
+### Re-Edit Videoでフォルダが見つからない
+- mainブランチで実行している場合、自動的に最新のvideo-editブランチを検索します
+- 特定のブランチで作業したい場合は、そのブランチを選択してワークフローを実行してください
 
 ## サポート
 

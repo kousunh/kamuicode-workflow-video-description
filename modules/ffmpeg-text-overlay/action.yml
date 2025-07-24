@@ -40,10 +40,10 @@ runs:
         
         for i in $(seq 0 $((DESC_COUNT - 1))); do
           DESC=$(echo "$DESCRIPTIONS" | jq -r ".[$i]")
-          TIMESTAMP=$(echo "$DESC" | jq -r '.timestamp')
+          START_TIME_STR=$(echo "$DESC" | jq -r '.start_time // .timestamp // "00:00"')
+          END_TIME_STR=$(echo "$DESC" | jq -r '.end_time // ""')
           TEXT=$(echo "$DESC" | jq -r '.text')
           ESCAPED_TEXT=$(echo "$TEXT" | sed "s/'/'\\\\''/g")
-          DURATION=$(echo "$DESC" | jq -r '.duration // 6')
           FONTSIZE=$(echo "$DESC" | jq -r '.fontsize // 48')
           POSITION=$(echo "$DESC" | jq -r '.position // "top-left"')
           
@@ -79,18 +79,40 @@ runs:
               ;;
           esac
           
-          # MM:SS を秒に変換
-          MINUTES=$(echo $TIMESTAMP | cut -d: -f1)
-          SECONDS=$(echo $TIMESTAMP | cut -d: -f2)
-          START_TIME=$((10#$MINUTES * 60 + 10#$SECONDS))
-          END_TIME=$((START_TIME + DURATION))
+          # MM:SS を秒に変換（エラーハンドリングを追加）
+          if [[ "$START_TIME_STR" =~ ^[0-9]+:[0-9]+$ ]]; then
+            MINUTES=$(echo $START_TIME_STR | cut -d: -f1 | sed 's/^0*//')
+            SECONDS=$(echo $START_TIME_STR | cut -d: -f2 | sed 's/^0*//')
+            MINUTES=${MINUTES:-0}
+            SECONDS=${SECONDS:-0}
+            START_TIME=$((MINUTES * 60 + SECONDS))
+          else
+            echo "⚠️ Invalid start_time format: $START_TIME_STR"
+            START_TIME=0
+          fi
+          
+          # end_time が指定されている場合はそれを使用、なければ duration を使用
+          if [ -n "$END_TIME_STR" ] && [ "$END_TIME_STR" != "null" ] && [[ "$END_TIME_STR" =~ ^[0-9]+:[0-9]+$ ]]; then
+            END_MINUTES=$(echo $END_TIME_STR | cut -d: -f1 | sed 's/^0*//')
+            END_SECONDS=$(echo $END_TIME_STR | cut -d: -f2 | sed 's/^0*//')
+            END_MINUTES=${END_MINUTES:-0}
+            END_SECONDS=${END_SECONDS:-0}
+            END_TIME=$((END_MINUTES * 60 + END_SECONDS))
+          else
+            # 旧形式の duration をサポート
+            DURATION=$(echo "$DESC" | jq -r '.duration // 6')
+            END_TIME=$((START_TIME + DURATION))
+          fi
+          
+          # デバッグ情報を出力
+          echo "  Text $((i+1)): '$TEXT' from $START_TIME_STR ($START_TIME s) to $END_TIME_STR ($END_TIME s)"
           
           # フェードイン/アウトの時間
           FADE_DURATION=0.5
           FADE_OUT_START=$(echo "$END_TIME - $FADE_DURATION" | bc)
           
-          # フィルタの追加
-          DRAWTEXT="drawtext=text='$ESCAPED_TEXT':fontfile='${{ inputs.fontfile }}':fontsize=$FONTSIZE:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=10:x=$X_POS:y=$Y_POS:enable='between(t,$START_TIME,$END_TIME)':alpha='if(lt(t,$START_TIME+$FADE_DURATION),(t-$START_TIME)/$FADE_DURATION,if(gt(t,$FADE_OUT_START),($END_TIME-t)/$FADE_DURATION,1))'"
+          # フィルタの追加（enableで厳密に時間を制御）
+          DRAWTEXT="drawtext=text='$ESCAPED_TEXT':fontfile='${{ inputs.fontfile }}':fontsize=$FONTSIZE:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=10:x=$X_POS:y=$Y_POS:enable='gte(t,$START_TIME)*lte(t,$END_TIME)':alpha='if(lt(t,$START_TIME+$FADE_DURATION),(t-$START_TIME)/$FADE_DURATION,if(gt(t,$FADE_OUT_START),($END_TIME-t)/$FADE_DURATION,1))'"
           
           if [ $i -eq 0 ]; then
             FILTER_COMPLEX="$DRAWTEXT"
@@ -99,14 +121,6 @@ runs:
           fi
         done
         
-        # 出力ディレクトリとベースファイル名を取得
-        OUTPUT_DIR=$(dirname "${{ inputs.output-path }}")
-        OUTPUT_BASENAME=$(basename "${{ inputs.output-path }}" .mp4)
-        
-        # タイムスタンプ付きファイル名を生成
-        TIMESTAMP=$(TZ=Asia/Tokyo date +%Y%m%d_%H%M%S)
-        TIMESTAMPED_OUTPUT="${OUTPUT_DIR}/${OUTPUT_BASENAME}_${TIMESTAMP}.mp4"
-        
         # 既存の出力ファイルを削除（念のため）
         rm -f "${{ inputs.output-path }}"
         
@@ -114,25 +128,11 @@ runs:
         ffmpeg -i "${{ inputs.video-path }}" \
           -vf "$FILTER_COMPLEX" \
           -c:v libx264 -c:a copy -pix_fmt yuv420p \
-          "$TIMESTAMPED_OUTPUT"
+          "${{ inputs.output-path }}"
         
-        if [ -f "$TIMESTAMPED_OUTPUT" ]; then
-          echo "✅ Text overlays applied successfully to: $TIMESTAMPED_OUTPUT"
-          
-          # 古いバージョンのファイルを削除
-          echo "🧹 Cleaning up old versions..."
-          find "$OUTPUT_DIR" -name "${OUTPUT_BASENAME}_*.mp4" \
-            ! -name "$(basename "$TIMESTAMPED_OUTPUT")" \
-            -type f -delete -print | while read deleted; do
-              echo "  Deleted: $deleted"
-          done
-          
-          # 最新ファイルへのシンボリックリンク作成（互換性のため）
-          ln -sf "$(basename "$TIMESTAMPED_OUTPUT")" "${{ inputs.output-path }}"
-          echo "📎 Created symlink: ${{ inputs.output-path }} -> $(basename "$TIMESTAMPED_OUTPUT")"
-          
+        if [ -f "${{ inputs.output-path }}" ]; then
+          echo "✅ Text overlays applied successfully to: ${{ inputs.output-path }}"
           echo "success=true" >> $GITHUB_OUTPUT
-          echo "timestamped-output=$TIMESTAMPED_OUTPUT" >> $GITHUB_OUTPUT
         else
           echo "❌ Text overlay application failed"
           echo "success=false" >> $GITHUB_OUTPUT

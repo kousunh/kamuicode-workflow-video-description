@@ -92,8 +92,8 @@ def main():
     parser.add_argument('--prompt-file', help='File containing the analysis prompt')
     parser.add_argument('--format', choices=['json', 'text', 'markdown'], default='json',
                       help='Output format (default: json)')
-    parser.add_argument('--model', default='gemini-1.5-flash',
-                      help='Gemini model to use (default: gemini-1.5-flash)')
+    parser.add_argument('--model', default='gemini-2.5-flash',
+                      help='Gemini model to use (default: gemini-2.5-flash)')
     
     args = parser.parse_args()
     

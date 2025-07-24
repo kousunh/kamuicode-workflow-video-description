@@ -1,0 +1,108 @@
+# FFmpeg設定ファイル
+# 動画処理で使用されるFFmpegの設定
+
+# タイトル画面の設定
+title:
+  duration: 3  # タイトル表示時間（秒）
+  
+  # デフォルトスタイル
+  default:
+    fontsize: 72
+    color: white
+    bgcolor: black@0.8  # 80%不透明の黒
+    fontfile: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+    position:
+      x: (w-text_w)/2  # 水平中央
+      y: (h-text_h)/2-30  # 垂直中央から30px上
+    shadow:
+      color: black@0.8
+      x: 3
+      y: 3
+    box:
+      enable: 1
+      color: black@0.4
+      borderw: 20
+  
+  # 背景画像使用時のスタイル
+  with_background:
+    fontsize: 92
+    color: white
+    bgcolor: transparent
+    position:
+      x: (w-text_w)/2
+      y: (h-text_h)/2
+    shadow:
+      color: black@1.0
+      x: 4
+      y: 4
+    box:
+      enable: 0
+    outline:
+      enable: true
+      color: black
+      width: 3
+  
+  # 背景画像の処理設定
+  background_image:
+    blur:
+      luma_radius: 5
+      chroma_radius: 5
+    opacity: 0.7
+    color_correction:
+      enable: true
+      curves: vintage
+
+# テキストオーバーレイ（説明文）の設定
+text_overlay:
+  default:
+    fontsize: 48
+    fontcolor: white
+    fontfile: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+    box:
+      enable: 1
+      color: black@0.7  # 70%不透明の黒
+      borderw: 10
+    fade:
+      in_duration: 0.5
+      out_duration: 0.5
+  
+  # 位置プリセット
+  positions:
+    top-left:
+      x: 50
+      y: 40
+    top-center:
+      x: (w-text_w)/2
+      y: 40
+    top-right:
+      x: w-text_w-50
+      y: 40
+    bottom-left:
+      x: 50
+      y: h-text_h-50
+    bottom-center:
+      x: (w-text_w)/2
+      y: h-text_h-50
+    bottom-right:
+      x: w-text_w-50
+      y: h-text_h-50
+
+# 動画エンコード設定
+video:
+  codec: libx264
+  pixel_format: yuv420p
+  audio_codec: copy
+
+# 背景音楽の設定
+music:
+  volume: 0.3
+  fade_in: 1.0
+  fade_out: 1.0
+
+# 動画結合時の設定
+video_concat:
+  fade_duration: 0.5
+  codec: libx264
+  preset: fast
+  crf: 22
+  audio_codec: aac
