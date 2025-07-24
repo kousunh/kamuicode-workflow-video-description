@@ -116,14 +116,14 @@ jobs:
           echo "📋 最近のビデオファイルのコミット履歴:"
           git log --oneline --name-only --pretty=format:"%h %ad %s" --date=short -- 'videos/*' | head -20 || true
           
-          # Get the most recently committed video file from git history
-          LATEST_VIDEO=$(git log --name-only --pretty=format: -- 'videos/*.mp4' 'videos/*.avi' 'videos/*.mov' 'videos/*.mkv' 'videos/*.webm' | grep -E '\.(mp4|avi|mov|mkv|webm)$' | head -1)
+          # Get the most recently modified video file from filesystem
+          # Using ls -t to sort by modification time (newest first)
+          echo "📹 ファイルシステムから最新の動画を検索します..."
+          LATEST_VIDEO=$(ls -t videos/*.mp4 videos/*.avi videos/*.mov videos/*.mkv videos/*.webm 2>/dev/null | head -1)
           
-          # If no video found in git history, fall back to ls
-          if [ -z "$LATEST_VIDEO" ]; then
-            echo "⚠️ Git履歴から検出できませんでした。ファイルシステムから検索します..."
-            LATEST_VIDEO=$(ls videos/*.mp4 videos/*.avi videos/*.mov videos/*.mkv videos/*.webm 2>/dev/null | head -1)
-          fi
+          # Alternative: Get the most recently committed video from git history
+          # This would require more complex parsing to get the actual latest file
+          # LATEST_VIDEO=$(git log --name-only --pretty=format: -- 'videos/*.mp4' 'videos/*.avi' 'videos/*.mov' 'videos/*.mkv' 'videos/*.webm' | grep -E '\.(mp4|avi|mov|mkv|webm)$' | head -1)
           
           if [ -z "$LATEST_VIDEO" ]; then
             echo "❌ videosディレクトリに動画ファイルが見つかりません"
