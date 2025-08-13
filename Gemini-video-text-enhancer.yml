@@ -1,4 +1,4 @@
-name: Video Text Enhancer
+name: Gemini-Video Text Enhancer
 
 on:
   workflow_dispatch:

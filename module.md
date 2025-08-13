@@ -238,6 +238,104 @@ python scripts/gemini_analyzer.py images/photo.jpg \
 - API呼び出しが失敗した場合は詳細なエラーメッセージを出力
 - 大きすぎるファイル（200MB以上）は警告を表示
 
+## 8. claude-code-image-generator
+Claude Code Actionを使用して画像を生成するモジュール
+
+### 必須入力
+- `claude-code-oauth-token`: Claude Code OAuthトークン
+- `env-var-value`: ツールURL（GitHubシークレットから）
+- `title`: 画像のタイトル
+- `folder-name`: 保存先フォルダー名
+- `image-prompt`: 画像生成プロンプト
+
+### オプション入力
+- `mcp-config-file`: MCP設定ファイルパス（デフォルト: settings/ClaudeCodeAction/.mcp.json）
+- `tool-name`: MCPツール名（デフォルト: t2i-kamui-imagen4-fast）
+- `env-var-name`: 環境変数名（デフォルト: T2I_KAMUI_IMAGEN4_FAST_URL）
+- `output-directory`: 出力ディレクトリ（デフォルト: title-image）
+
+### 出力
+- `image-generated`: 画像生成の成功可否（true/false）
+
+### 使用例
+```yaml
+- uses: ./modules/claude-code-image-generator
+  with:
+    claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    env-var-value: ${{ secrets.T2I_KAMUI_IMAGEN4_FAST_URL }}
+    title: "動画タイトル"
+    folder-name: "folder"
+    image-prompt: "cinematic landscape with professional lighting"
+```
+
+## 9. claude-code-music-generator
+Claude Code Actionを使用して音楽を生成するモジュール
+
+### 必須入力
+- `claude-code-oauth-token`: Claude Code OAuthトークン
+- `env-var-value`: ツールURL（GitHubシークレットから）
+- `title`: 音楽のタイトル
+- `folder-name`: 保存先フォルダー名
+- `music-prompt`: 音楽生成プロンプト
+
+### オプション入力
+- `mcp-config-file`: MCP設定ファイルパス（デフォルト: settings/ClaudeCodeAction/.mcp.json）
+- `tool-name`: MCPツール名（デフォルト: t2m-kamui-lyria）
+- `env-var-name`: 環境変数名（デフォルト: T2M_KAMUI_LYRIA_URL）
+- `output-directory`: 出力ディレクトリ（デフォルト: music）
+
+### 出力
+- `music-generated`: 音楽生成の成功可否（true/false）
+
+### 使用例
+```yaml
+- uses: ./modules/claude-code-music-generator
+  with:
+    claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    env-var-value: ${{ secrets.T2M_KAMUI_LYRIA_URL }}
+    title: "動画タイトル"
+    folder-name: "folder"
+    music-prompt: "ambient cinematic background music"
+```
+
+## 10. mcp-tool-extractor
+MCP設定ファイルから特定のツールを抽出するモジュール
+
+### 必須入力
+- `input-file`: 入力MCPファイル名（例: 2.mcp.json）
+- `output-file`: 出力MCPファイル名（例: extracted.mcp.json）
+- `tool-names`: 抽出するツール名（カンマ区切り）
+
+### オプション入力
+- `replace-env-vars`: 環境変数を置換するか（デフォルト: true）
+- `T2I_FAL_WAN_V22_A14B_URL`: t2i-kamui-wan-v2-2-a14b用シークレット
+- `T2V_FAL_WAN_V22_5B_FAST_URL`: t2v-kamui-wan-v2-2-5b-fast用シークレット
+- `T2I_FAL_QWEN_IMAGE_URL`: t2i-kamui-qwen-image用シークレット
+- `T2I_KAMUI_IMAGEN4_FAST_URL`: t2i-kamui-imagen4-fast用シークレット
+- `T2M_GOOGLE_LYRIA_URL`: t2m-kamui-lyria用シークレット
+
+### 出力
+- `extraction-success`: ツール抽出の成功状態
+- `extracted-tools`: 抽出されたツールのリスト
+
+### 使用例
+```yaml
+- uses: ./modules/mcp-tool-extractor
+  with:
+    input-file: "settings/ClaudeCodeAction/.mcp.json"
+    output-file: ".mcp.json"
+    tool-names: "t2i-kamui-imagen4-fast,t2m-kamui-lyria"
+    replace-env-vars: "true"
+    T2I_KAMUI_IMAGEN4_FAST_URL: ${{ secrets.T2I_KAMUI_IMAGEN4_FAST_URL }}
+    T2M_GOOGLE_LYRIA_URL: ${{ secrets.T2M_KAMUI_LYRIA_URL }}
+```
+
+### 特徴
+- 複数のMCPツールを選択的に抽出可能
+- 環境変数プレースホルダーの自動置換
+- JSON構文の検証機能
+- GitHub Actionsワークフローへの統合が容易
+
 ## 共通の注意事項
 
 1. **パス指定**: 全てのパスは作業ディレクトリからの相対パスで指定
@@ -245,3 +343,5 @@ python scripts/gemini_analyzer.py images/photo.jpg \
 3. **エラーハンドリング**: 各モジュールは成功/失敗を出力として返すので、後続の処理で確認可能
 4. **レート制限対策**: gemini-cliモジュールは自動的に2回までリトライ（60秒待機）
 5. **.gemini/ディレクトリ**: gemini-cliモジュールは一時的に.gemini/settings.jsonを作成しますが、処理終了後に自動削除されます
+6. **Claude Code Action**: claude-code-image-generatorとclaude-code-music-generatorモジュールはClaude Code OAuthトークンが必要
+7. **MCP設定**: mcp-tool-extractorを使用してMCP設定から必要なツールのみを抽出し、環境変数を安全に置換
