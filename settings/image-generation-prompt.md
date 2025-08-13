@@ -11,9 +11,9 @@
 
 1. `mkdir -p ${FOLDER_NAME}/title-image`
 2. タイトルから高品質な背景画像のプロンプトを作成（英語で、cinematic, bokeh effect, warm color palette等を含む）
-3. `mcp__t2i-fal-imagen4-fast__imagen4_fast_submit`で生成開始
-4. `mcp__t2i-fal-imagen4-fast__imagen4_fast_status`で完了確認（最大20回）
-5. `mcp__t2i-fal-imagen4-fast__imagen4_fast_result`でURL取得
+3. `mcp__t2i-kamui-imagen4-fast__imagen4_fast_submit`で生成開始
+4. `mcp__t2i-kamui-imagen4-fast__imagen4_fast_status`で完了確認（最大20回）
+5. `mcp__t2i-kamui-imagen4-fast__imagen4_fast_result`でURL取得
 6. 重要: 必ず`curl -L -o "$(pwd)/${FOLDER_NAME}/title-image/background.jpg" "$IMAGE_URL"`でダウンロード
 7. generation-info.jsonに生成情報を保存
 ```

@@ -71,8 +71,8 @@ cp your-video.mp4 videos/
 
 **必須設定**:
 - GitHubリポジトリのSecretsに以下の値を設定するだけで動作します：
-  - `T2I_FAL_IMAGEN4_FAST_URL`: Imagen4 FastのMCPサーバーURL
-  - `T2M_GOOGLE_LYRIA_URL`: Google LyriaのMCPサーバーURL
+  - `T2I_KAMUI_IMAGEN4_FAST_URL`: Imagen4 FastのMCPサーバーURL
+  - `T2M_KAMUI_LYRIA_URL`: Google LyriaのMCPサーバーURL
   - `GEMINI_API_KEY`: Gemini APIキー
 
 **セキュリティ上の利点**:
@@ -84,12 +84,12 @@ cp your-video.mp4 videos/
 ```json
 {
   "mcpServers": {
-    "t2i-fal-imagen4-fast": {
-      "httpUrl": "<T2I_FAL_IMAGEN4_FAST_URLの値>",
+    "t2i-kamui-imagen4-fast": {
+      "httpUrl": "<T2I_KAMUI_IMAGEN4_FAST_URLの値>",
       "timeout": 300000
     },
-    "t2m-google-lyria": {
-      "httpUrl": "<T2M_GOOGLE_LYRIA_URLの値>",
+    "t2m-kamui-lyria": {
+      "httpUrl": "<T2M_KAMUI_LYRIA_URLの値>",
       "timeout": 300000
     }
   },
@@ -101,7 +101,7 @@ cp your-video.mp4 videos/
   ]
 }
 ```
-※ `<T2I_FAL_IMAGEN4_FAST_URLの値>`と`<T2M_GOOGLE_LYRIA_URLの値>`には、GitHub Secretsに設定した実際のURLが挿入されます
+※ `<T2I_KAMUI_IMAGEN4_FAST_URLの値>`と`<T2M_KAMUI_LYRIA_URLの値>`には、GitHub Secretsに設定した実際のURLが挿入されます
 
 ### MCPツールの限定設定
 
@@ -130,10 +130,10 @@ permissions:
 ### 必須シークレット
 - **Name**: `GEMINI_API_KEY`
 - **Secret**: 取得したGemini APIキー
-- **Name**: `T2I_FAL_IMAGEN4_FAST_URL`
-- **Secret**: kamuicode MCPサーバーのImagen4 FastエンドポイントURL（上記settings.jsonの`t2i-fal-imagen4-fast-url`に設定するURL）
-- **Name**: `T2M_GOOGLE_LYRIA_URL`
-- **Secret**: kamuicode MCPサーバーのGoogle LyriaエンドポイントURL（上記settings.jsonの`t2m-google-lyria-url`に設定するURL）
+- **Name**: `T2I_KAMUI_IMAGEN4_FAST_URL`
+- **Secret**: kamuicode MCPサーバーのImagen4 FastエンドポイントURL（上記settings.jsonの`t2i-kamui-imagen4-fast`に設定するURL）
+- **Name**: `T2M_KAMUI_LYRIA_URL`
+- **Secret**: kamuicode MCPサーバーのGoogle LyriaエンドポイントURL（上記settings.jsonの`t2m-kamui-lyria`に設定するURL）
 
 ### オプションシークレット（PR自動作成用）
 - **Name**: `PAT_TOKEN`
@@ -200,7 +200,7 @@ A: `videos/`ディレクトリに動画ファイルが存在することを確�
 A: APIキーが正しく設定されているか、API制限に達していないか確認してください。
 
 ### Q: AI画像/音楽生成がエラーになる
-A: GitHub Secretsに`T2I_FAL_IMAGEN4_FAST_URL`と`T2M_GOOGLE_LYRIA_URL`が正しく設定されているか確認してください。
+A: GitHub Secretsに`T2I_KAMUI_IMAGEN4_FAST_URL`と`T2M_KAMUI_LYRIA_URL`が正しく設定されているか確認してください。
 
 ### Q: 高速に処理したい
 A: AI生成機能を無効にしてください（`generate_title_image`と`generate_background_music`を`false`に設定）。
@@ -242,7 +242,7 @@ A: AI生成機能を無効にしてください（`generate_title_image`と`gene
 ### 画像・音楽が生成されない
 - ワークフローの画像・音楽生成ジョブの詳細ログを確認してください
 - Gemini CLI Actionのレートリミットで止まっている可能性があります
-- GitHub Secretsの`T2I_FAL_IMAGEN4_FAST_URL`と`T2M_GOOGLE_LYRIA_URL`が正しく設定されているか確認してください
+- GitHub Secretsの`T2I_KAMUI_IMAGEN4_FAST_URL`と`T2M_KAMUI_LYRIA_URL`が正しく設定されているか確認してください
 
 ### Re-Edit Videoでフォルダが見つからない
 - mainブランチで実行している場合、自動的に最新のvideo-editブランチを検索します

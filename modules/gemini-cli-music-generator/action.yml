@@ -23,7 +23,7 @@ inputs:
   GEMINI_API_KEY:
     description: 'Gemini API Key'
     required: true
-  T2M_GOOGLE_LYRIA_URL:
+  T2M_KAMUI_LYRIA_URL:
     description: 'Text-to-Music API URL'
     required: true
 
@@ -50,8 +50,8 @@ runs:
         cat > .gemini/settings.json << EOF
         {
           "mcpServers": {
-            "t2m-google-lyria": {
-              "httpUrl": "${{ inputs.T2M_GOOGLE_LYRIA_URL }}",
+            "t2m-kamui-lyria": {
+              "httpUrl": "${{ inputs.T2M_KAMUI_LYRIA_URL }}",
               "timeout": 300000
             }
           },

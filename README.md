@@ -229,7 +229,7 @@ graph LR
 ### 画像・音楽が生成されない
 - ワークフローの画像・音楽生成ジョブの詳細ログを確認してください
 - Gemini CLI Actionのレートリミットで止まっている可能性があります
-- GitHub Secretsの`T2I_FAL_IMAGEN4_FAST_URL`と`T2M_GOOGLE_LYRIA_URL`が正しく設定されているか確認してください
+- GitHub Secretsの`T2I_KAMUI_IMAGEN4_FAST_URL`と`T2M_KAMUI_LYRIA_URL`が正しく設定されているか確認してください
 
 ## ワークフローの動作モード
 

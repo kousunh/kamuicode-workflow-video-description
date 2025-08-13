@@ -11,9 +11,9 @@
 
 1. `mkdir -p ${FOLDER_NAME}/music`
 2. 英語で音楽プロンプトを作成（例: "A short 20-second ambient music"）
-3. `mcp__t2m-google-lyria__lyria_submit`で生成開始
-4. `mcp__t2m-google-lyria__lyria_status`で完了確認（最大30回、5秒間隔）
-5. `mcp__t2m-google-lyria__lyria_result`でURL取得
+3. `mcp__t2m-kamui-lyria__lyria_submit`で生成開始
+4. `mcp__t2m-kamui-lyria__lyria_status`で完了確認（最大30回、5秒間隔）
+5. `mcp__t2m-kamui-lyria__lyria_result`でURL取得
 6. **必須**: `curl -L -f --retry 3 -o "$(pwd)/${FOLDER_NAME}/music/background.wav" "$MUSIC_URL"`でダウンロード
 7. ファイルサイズが50KB未満なら再試行
 8. generation-info.jsonに生成情報を保存

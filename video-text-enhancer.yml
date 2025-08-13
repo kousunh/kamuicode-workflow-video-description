@@ -606,7 +606,7 @@ jobs:
         commit-message: '🖼️ Add generated title background image - Title: ${{ needs.analyze-video.outputs.title }}'
         generation-prompt: ${{ steps.load-prompt.outputs.image-prompt }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        T2I_FAL_IMAGEN4_FAST_URL: ${{ secrets.T2I_FAL_IMAGEN4_FAST_URL }}
+        T2I_KAMUI_IMAGEN4_FAST_URL: ${{ secrets.T2I_KAMUI_IMAGEN4_FAST_URL }}
         
     - name: Commit title image
       if: steps.generate.outputs.image-generated == 'true'
@@ -661,7 +661,7 @@ jobs:
         commit-message: '🎵 Add generated background music - Title: ${{ needs.analyze-video.outputs.title }}'
         generation-prompt: ${{ steps.load-prompt.outputs.music-prompt }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        T2M_GOOGLE_LYRIA_URL: ${{ secrets.T2M_GOOGLE_LYRIA_URL }}
+        T2M_KAMUI_LYRIA_URL: ${{ secrets.T2M_KAMUI_LYRIA_URL }}
         
     - name: Commit music
       if: steps.generate.outputs.music-generated == 'true'

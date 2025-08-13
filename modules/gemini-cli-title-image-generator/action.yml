@@ -23,7 +23,7 @@ inputs:
   GEMINI_API_KEY:
     description: 'Gemini API Key'
     required: true
-  T2I_FAL_IMAGEN4_FAST_URL:
+  T2I_KAMUI_IMAGEN4_FAST_URL:
     description: 'Text-to-Image API URL'
     required: true
 
@@ -50,8 +50,8 @@ runs:
         cat > .gemini/settings.json << EOF
         {
           "mcpServers": {
-            "t2i-fal-imagen4-fast": {
-              "httpUrl": "${{ inputs.T2I_FAL_IMAGEN4_FAST_URL }}",
+            "t2i-kamui-imagen4-fast": {
+              "httpUrl": "${{ inputs.T2I_KAMUI_IMAGEN4_FAST_URL }}",
               "timeout": 300000
             }
           },

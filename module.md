@@ -107,7 +107,7 @@ AI（Gemini + Imagen4）で画像を生成するモジュール
 - `folder-name`: 出力フォルダー名
 - `generation-prompt`: Geminiエージェントに渡すプロンプト全体
 - `GEMINI_API_KEY`: Gemini API Key
-- `T2I_FAL_IMAGEN4_FAST_URL`: Text-to-Image API URL
+- `T2I_KAMUI_IMAGEN4_FAST_URL`: Text-to-Image API URL
 
 ### オプション入力
 - `output-path`: 生成された画像の保存パス（デフォルト: title-image/background.jpg）
@@ -129,14 +129,14 @@ AI（Gemini + Imagen4）で画像を生成するモジュール
       
       1. `mkdir -p ${{ needs.setup-branch.outputs.folder-name }}/title-image`
       2. タイトルに合った高品質な背景画像のプロンプトを作成（英語で、cinematic style, professional lighting等を含む）
-      3. `mcp__t2i-fal-imagen4-fast__imagen4_fast_submit`で生成開始
-      4. `mcp__t2i-fal-imagen4-fast__imagen4_fast_status`で完了確認（最大30回、5秒間隔）
-      5. `mcp__t2i-fal-imagen4-fast__imagen4_fast_result`でURL取得
+      3. `mcp__t2i-kamui-imagen4-fast__imagen4_fast_submit`で生成開始
+      4. `mcp__t2i-kamui-imagen4-fast__imagen4_fast_status`で完了確認（最大30回、5秒間隔）
+      5. `mcp__t2i-kamui-imagen4-fast__imagen4_fast_result`でURL取得
       6. **必須**: `curl -L -o "$(pwd)/${{ needs.setup-branch.outputs.folder-name }}/title-image/background.jpg" "$IMAGE_URL"`でダウンロード
       7. ファイルサイズが1KB未満なら再試行
       8. generation-info.jsonに生成情報を保存
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-    T2I_FAL_IMAGEN4_FAST_URL: ${{ secrets.T2I_FAL_IMAGEN4_FAST_URL }}
+    T2I_KAMUI_IMAGEN4_FAST_URL: ${{ secrets.T2I_KAMUI_IMAGEN4_FAST_URL }}
 ```
 
 ## 6. gemini-cli-music-generator  
@@ -147,7 +147,7 @@ AI（Gemini + Google Lyria）で音楽を生成するモジュール
 - `folder-name`: 出力フォルダー名
 - `generation-prompt`: Geminiエージェントに渡すプロンプト全体
 - `GEMINI_API_KEY`: Gemini API Key
-- `T2M_GOOGLE_LYRIA_URL`: Text-to-Music API URL
+- `T2M_KAMUI_LYRIA_URL`: Text-to-Music API URL
 
 ### オプション入力
 - `output-path`: 生成された音楽の保存パス（デフォルト: music/background.mp3）
@@ -169,14 +169,14 @@ AI（Gemini + Google Lyria）で音楽を生成するモジュール
       
       1. `mkdir -p ${{ needs.setup-branch.outputs.folder-name }}/music`
       2. 動画のトーンに合った音楽ジャンルを選択（ambient, cinematic等）
-      3. `mcp__t2m-google-lyria__lyria_submit`で生成開始（short, 20-second, ambient music）
-      4. `mcp__t2m-google-lyria__lyria_status`で完了確認（最大30回、5秒間隔）
-      5. `mcp__t2m-google-lyria__lyria_result`でURL取得
+      3. `mcp__t2m-kamui-lyria__lyria_submit`で生成開始（short, 20-second, ambient music）
+      4. `mcp__t2m-kamui-lyria__lyria_status`で完了確認（最大30回、5秒間隔）
+      5. `mcp__t2m-kamui-lyria__lyria_result`でURL取得
       6. **必須**: `curl -L -o "$(pwd)/${{ needs.setup-branch.outputs.folder-name }}/music/background.mp3" "$MUSIC_URL"`でダウンロード
       7. ファイルサイズが50KB未満なら再試行
       8. generation-info.jsonに生成情報を保存
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-    T2M_GOOGLE_LYRIA_URL: ${{ secrets.T2M_GOOGLE_LYRIA_URL }}
+    T2M_KAMUI_LYRIA_URL: ${{ secrets.T2M_KAMUI_LYRIA_URL }}
 ```
 
 ## 7. gemini_analyzer.py (Pythonスクリプト)
