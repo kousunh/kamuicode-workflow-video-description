@@ -1,0 +1,165 @@
+name: 'Claude Code Music Generator'
+description: 'Generate music using Claude Code Action with MCP tools'
+inputs:
+  claude-code-oauth-token:
+    description: 'Claude Code OAuth token'
+    required: true
+  mcp-config-file:
+    description: 'Path to MCP configuration file'
+    required: false
+    default: 'settings/ClaudeCodeAction/.mcp.json'
+  tool-name:
+    description: 'MCP tool name for music generation'
+    required: false
+    default: 't2m-kamui-lyria'
+  env-var-name:
+    description: 'Environment variable name for the tool URL'
+    required: false
+    default: 'T2M_KAMUI_LYRIA_URL'
+  env-var-value:
+    description: 'Environment variable value (usually from secrets)'
+    required: true
+  title:
+    description: 'Title for the music'
+    required: true
+  folder-name:
+    description: 'Folder name to save the music'
+    required: true
+  music-prompt:
+    description: 'Prompt for music generation'
+    required: true
+  output-directory:
+    description: 'Output directory for the generated music'
+    required: false
+    default: 'music'
+outputs:
+  music-generated:
+    description: 'Whether the music was successfully generated'
+    value: ${{ steps.check-result.outputs.music-generated }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Extract MCP tool for music generation
+      uses: ./modules/mcp-tool-extractor
+      with:
+        input-file: ${{ inputs.mcp-config-file }}
+        output-file: '.mcp.json'
+        tool-names: ${{ inputs.tool-name }}
+        replace-env-vars: 'false'
+        
+    - name: Replace URL in .mcp.json with secret
+      shell: bash
+      run: |
+        echo "📝 Replacing URL in .mcp.json with secret..."
+        
+        # 環境変数を設定（GitHubシークレット必須）
+        ENV_VAR_VALUE="${{ inputs.env-var-value }}"
+        if [ -z "$ENV_VAR_VALUE" ]; then
+          echo "❌ ${{ inputs.env-var-name }} secret is required but not set"
+          echo "Please add ${{ inputs.env-var-name }} to your GitHub Secrets"
+          exit 1
+        else
+          echo "✅ Environment variable configured"
+        fi
+        
+        # .mcp.jsonファイルのURLを置換
+        if [ -f ".mcp.json" ]; then
+          # jqを使ってJSONを正しく処理
+          PLACEHOLDER="\${${{ inputs.env-var-name }}}"
+          cat .mcp.json | jq --arg old "$PLACEHOLDER" --arg new "$ENV_VAR_VALUE" \
+            '.mcpServers |= map_values(if .url == $old then .url = $new else . end)' > .mcp.json.tmp
+          mv .mcp.json.tmp .mcp.json
+          
+          # MCPファイルの更新を確認（内容は表示しない）
+          echo "✅ MCP configuration updated"
+          
+          # 置換が成功したか確認
+          if grep -q "\${${{ inputs.env-var-name }}}" .mcp.json; then
+            echo "❌ ERROR: 環境変数の置換が失敗しました！"
+            echo "🔍 プレースホルダーが残っています: \${${{ inputs.env-var-name }}}"
+            echo "🛠️ ワークフローを停止します"
+            exit 1
+          else
+            echo "✅ 環境変数の置換が成功しました"
+          fi
+          
+          # JSONの構文チェック
+          if command -v jq >/dev/null 2>&1; then
+            echo "🔍 Validating JSON syntax..."
+            if jq empty .mcp.json 2>/dev/null; then
+              echo "✅ JSON syntax is valid"
+            else
+              echo "❌ JSON syntax error detected"
+              exit 1
+            fi
+          fi
+        else
+          echo "❌ .mcp.json not found"
+          exit 1
+        fi
+        
+    - name: Generate background music with Claude Code Action
+      id: generate
+      uses: anthropics/claude-code-action@beta
+      with:
+        claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
+        mode: agent
+        mcp_config: .mcp.json
+        settings: |
+          {
+            "permissions": {
+              "allow": [
+                "mcp__${{ inputs.tool-name }}__lyria_generate",
+                "Bash",
+                "Write",
+                "Read",
+                "Edit",
+                "LS",
+                "Glob"              
+                ]
+            }
+          }
+        direct_prompt: |
+          Generate background music for the video and save it to the file system.
+          
+          Title: ${{ inputs.title }}
+          Folder: ${{ inputs.folder-name }}
+          Music Prompt: ${{ inputs.music-prompt }}
+          
+          Required actions:
+          1. Use mcp__${{ inputs.tool-name }}__lyria_generate to generate the music with these parameters:
+             - prompt: Use the music prompt provided
+             - style: "ambient"
+             - tempo: "medium"
+             - duration: 25
+             - output_directory: "${{ inputs.folder-name }}/${{ inputs.output-directory }}"
+             - auto_download: true
+             - auto_open: false
+          2. Verify file exists: ls -la ${{ inputs.folder-name }}/${{ inputs.output-directory }}/
+          3. Set output: echo "music-generated=true" >> $GITHUB_OUTPUT
+          
+          IMPORTANT: Work in the current directory, not in /root/. All paths should be relative.
+          You have explicit permissions for mcp__${{ inputs.tool-name }}__lyria_generate, Bash, Write, Read, LS, and Glob tools.
+        additional_permissions: |
+          contents: write
+        
+    - name: Check and set output
+      id: check-result
+      if: always()
+      shell: bash
+      run: |
+        # Check if any music file exists in the directory and set output
+        FOLDER_NAME="${{ inputs.folder-name }}"
+        OUTPUT_DIR="${{ inputs.output-directory }}"
+        if ls "$FOLDER_NAME/$OUTPUT_DIR/"*.wav 2>/dev/null || ls "$FOLDER_NAME/$OUTPUT_DIR/"*.mp3 2>/dev/null; then
+          echo "✅ Background music found:"
+          ls -la "$FOLDER_NAME/$OUTPUT_DIR/"
+          echo "music-generated=true" >> $GITHUB_OUTPUT
+        else
+          echo "⚠️ Background music not found in $FOLDER_NAME/$OUTPUT_DIR/"
+          echo "📁 Directory contents:"
+          ls -la "$FOLDER_NAME/" 2>/dev/null || echo "Folder not found"
+          ls -la "$FOLDER_NAME/$OUTPUT_DIR/" 2>/dev/null || echo "Output directory not found"
+          echo "music-generated=false" >> $GITHUB_OUTPUT
+        fi

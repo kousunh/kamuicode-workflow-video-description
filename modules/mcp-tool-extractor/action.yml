@@ -1,0 +1,145 @@
+name: 'MCP Tool Extractor'
+description: 'Extract specific MCP tools from a full MCP configuration file'
+author: 'KamuiCode'
+
+inputs:
+  input-file:
+    description: '入力MCPファイル名（例: 2.mcp.json）'
+    required: true
+  output-file:
+    description: '出力MCPファイル名（例: extracted.mcp.json）'
+    required: true
+  tool-names:
+    description: '抽出するMCPツール名（カンマ区切りで複数可。例: t2i-kamui-imagen4-fast,t2m-kamui-lyria）'
+    required: true
+  replace-env-vars:
+    description: '環境変数を置換するかどうか（true/false）'
+    required: false
+    default: 'true'
+  T2I_FAL_WAN_V22_A14B_URL:
+    description: 'Secret for t2i-kamui-wan-v2-2-a14b'
+    required: false
+  T2V_FAL_WAN_V22_5B_FAST_URL:
+    description: 'Secret for t2v-kamui-wan-v2-2-5b-fast'
+    required: false
+  T2I_FAL_QWEN_IMAGE_URL:
+    description: 'Secret for t2i-kamui-qwen-image'
+    required: false
+  T2I_KAMUI_IMAGEN4_FAST_URL:
+    description: 'Secret for t2i-kamui-imagen4-fast'
+    required: false
+  T2M_GOOGLE_LYRIA_URL:
+    description: 'Secret for t2m-kamui-lyria'
+    required: false
+
+outputs:
+  extraction-success:
+    description: 'MCP tool extraction success status'
+    value: ${{ steps.extract.outputs.success }}
+  extracted-tools:
+    description: 'List of extracted tools'
+    value: ${{ steps.extract.outputs.tools }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Extract MCP tools
+      id: extract
+      shell: bash
+      run: |
+        echo "📝 Extracting tools: ${{ inputs.tool-names }}"
+        echo "📂 Input file: ${{ inputs.input-file }}"
+        echo "📂 Output file: ${{ inputs.output-file }}"
+        
+        INPUT_FILE="${{ inputs.input-file }}"
+        OUTPUT_FILE="${{ inputs.output-file }}"
+        
+        if [ -f "$INPUT_FILE" ]; then
+          # カンマ区切りのツール名を配列に変換
+          IFS=',' read -ra TOOLS <<< "${{ inputs.tool-names }}"
+          
+          # jqフィルタを構築して複数のツールを抽出
+          JQ_FILTER='{mcpServers: {'
+          FIRST=true
+          for tool in "${TOOLS[@]}"; do
+            # ツール名の前後の空白を削除
+            tool=$(echo "$tool" | xargs)
+            if [ "$FIRST" = true ]; then
+              JQ_FILTER="$JQ_FILTER\"$tool\": .mcpServers[\"$tool\"]"
+              FIRST=false
+            else
+              JQ_FILTER="$JQ_FILTER, \"$tool\": .mcpServers[\"$tool\"]"
+            fi
+          done
+          JQ_FILTER="$JQ_FILTER}}"
+          
+          echo "📝 Using JQ filter: $JQ_FILTER"
+          
+          # jqを使って指定されたツールを抽出
+          jq "$JQ_FILTER" "$INPUT_FILE" > "$OUTPUT_FILE"
+          
+          echo "📋 Extracted MCP configuration:"
+          cat "$OUTPUT_FILE"
+          
+          # 環境変数置換が有効な場合
+          if [ "${{ inputs.replace-env-vars }}" = "true" ]; then
+            echo "🔄 Replacing environment variables..."
+            
+            # 各ツールに対応する環境変数を置換
+            for tool in "${TOOLS[@]}"; do
+              tool=$(echo "$tool" | xargs)
+              ENV_VAR_NAME=""
+              ENV_VAR_VALUE=""
+              
+              # ツール名から環境変数名をマッピング
+              case "$tool" in
+                "t2i-kamui-wan-v2-2-a14b")
+                  ENV_VAR_NAME="T2I_FAL_WAN_V22_A14B_URL"
+                  ENV_VAR_VALUE="${{ inputs.T2I_FAL_WAN_V22_A14B_URL }}"
+                  ;;
+                "t2v-kamui-wan-v2-2-5b-fast")
+                  ENV_VAR_NAME="T2V_FAL_WAN_V22_5B_FAST_URL"
+                  ENV_VAR_VALUE="${{ inputs.T2V_FAL_WAN_V22_5B_FAST_URL }}"
+                  ;;
+                "t2i-kamui-qwen-image")
+                  ENV_VAR_NAME="T2I_FAL_QWEN_IMAGE_URL"
+                  ENV_VAR_VALUE="${{ inputs.T2I_FAL_QWEN_IMAGE_URL }}"
+                  ;;
+                "t2i-kamui-imagen4-fast")
+                  ENV_VAR_NAME="T2I_KAMUI_IMAGEN4_FAST_URL"
+                  ENV_VAR_VALUE="${{ inputs.T2I_KAMUI_IMAGEN4_FAST_URL }}"
+                  ;;
+                "t2m-kamui-lyria")
+                  ENV_VAR_NAME="T2M_GOOGLE_LYRIA_URL"
+                  ENV_VAR_VALUE="${{ inputs.T2M_GOOGLE_LYRIA_URL }}"
+                  ;;
+              esac
+              
+              if [ -n "$ENV_VAR_NAME" ] && [ -n "$ENV_VAR_VALUE" ]; then
+                echo "✅ Replacing $ENV_VAR_NAME for tool $tool"
+                # sedで環境変数プレースホルダーを置換
+                sed -i "s|\${$ENV_VAR_NAME}|$ENV_VAR_VALUE|g" "$OUTPUT_FILE"
+              elif [ -n "$ENV_VAR_NAME" ]; then
+                echo "⚠️ Warning: Secret $ENV_VAR_NAME not provided for tool $tool"
+              fi
+            done
+          fi
+          
+          echo "📋 Final MCP configuration:"
+          cat "$OUTPUT_FILE"
+          
+          # JSONの検証
+          if jq empty "$OUTPUT_FILE" 2>/dev/null; then
+            echo "✅ JSON syntax is valid"
+            echo "success=true" >> $GITHUB_OUTPUT
+            echo "tools=${{ inputs.tool-names }}" >> $GITHUB_OUTPUT
+          else
+            echo "❌ JSON syntax error"
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+        else
+          echo "❌ Input file $INPUT_FILE not found"
+          echo "success=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi

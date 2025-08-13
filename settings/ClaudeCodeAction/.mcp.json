@@ -1,0 +1,29 @@
+{
+  "mcpServers": {
+    "t2i-kamui-wan-v2-2-a14b": {
+      "type": "http",
+      "url": "${T2I_FAL_WAN_V22_A14B_URL}",
+      "description": "WAN v2.2-a14b Text-to-Image via Kamui Code ⭐"
+    },
+    "t2v-kamui-wan-v2-2-5b-fast": {
+      "type": "http",
+      "url": "${T2V_FAL_WAN_V22_5B_FAST_URL}",
+      "description": "WAN v2.2-5b FastVideo via Kamui Code ⭐"
+    },
+    "t2i-kamui-qwen-image": {
+      "type": "http",
+      "url": "${T2I_FAL_QWEN_IMAGE_URL}",
+      "description": "Qwen-Image Text-to-Image via Kamui Code ⭐"
+    },
+    "t2i-kamui-imagen4-fast": {
+      "type": "http",
+      "url": "${T2I_KAMUI_IMAGEN4_FAST_URL}",
+      "description": "Imagen4 Fast (Speed Optimized) via Kamui Code ⭐"
+    },
+    "t2m-kamui-lyria": {
+      "type": "http",
+      "url": "${T2M_KAMUI_LYRIA_URL}",
+      "description": "Kamui Lyria Text-to-Music via Kamui Code ⭐"
+    }
+  }
+}

@@ -1,0 +1,164 @@
+name: 'Claude Code Image Generator'
+description: 'Generate images using Claude Code Action with MCP tools'
+inputs:
+  claude-code-oauth-token:
+    description: 'Claude Code OAuth token'
+    required: true
+  mcp-config-file:
+    description: 'Path to MCP configuration file'
+    required: false
+    default: 'settings/ClaudeCodeAction/.mcp.json'
+  tool-name:
+    description: 'MCP tool name for image generation'
+    required: false
+    default: 't2i-kamui-imagen4-fast'
+  env-var-name:
+    description: 'Environment variable name for the tool URL'
+    required: false
+    default: 'T2I_KAMUI_IMAGEN4_FAST_URL'
+  env-var-value:
+    description: 'Environment variable value (usually from secrets)'
+    required: true
+  title:
+    description: 'Title for the image'
+    required: true
+  folder-name:
+    description: 'Folder name to save the image'
+    required: true
+  image-prompt:
+    description: 'Prompt for image generation'
+    required: true
+  output-directory:
+    description: 'Output directory for the generated image'
+    required: false
+    default: 'title-image'
+outputs:
+  image-generated:
+    description: 'Whether the image was successfully generated'
+    value: ${{ steps.check-result.outputs.image-generated }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Extract MCP tool for image generation
+      uses: ./modules/mcp-tool-extractor
+      with:
+        input-file: ${{ inputs.mcp-config-file }}
+        output-file: '.mcp.json'
+        tool-names: ${{ inputs.tool-name }}
+        replace-env-vars: 'false'
+        
+    - name: Replace URL in .mcp.json with secret
+      shell: bash
+      run: |
+        echo "📝 Replacing URL in .mcp.json with secret..."
+        
+        # 環境変数を設定（GitHubシークレット必須）
+        ENV_VAR_VALUE="${{ inputs.env-var-value }}"
+        if [ -z "$ENV_VAR_VALUE" ]; then
+          echo "❌ ${{ inputs.env-var-name }} secret is required but not set"
+          echo "Please add ${{ inputs.env-var-name }} to your GitHub Secrets"
+          exit 1
+        else
+          echo "✅ Environment variable configured"
+        fi
+        
+        # .mcp.jsonファイルのURLを置換
+        if [ -f ".mcp.json" ]; then
+          # jqを使ってJSONを正しく処理
+          PLACEHOLDER="\${${{ inputs.env-var-name }}}"
+          cat .mcp.json | jq --arg old "$PLACEHOLDER" --arg new "$ENV_VAR_VALUE" \
+            '.mcpServers |= map_values(if .url == $old then .url = $new else . end)' > .mcp.json.tmp
+          mv .mcp.json.tmp .mcp.json
+          
+          # MCPファイルの更新を確認（内容は表示しない）
+          echo "✅ MCP configuration updated"
+          
+          # 置換が成功したか確認
+          if grep -q "\${${{ inputs.env-var-name }}}" .mcp.json; then
+            echo "❌ ERROR: 環境変数の置換が失敗しました！"
+            echo "🔍 プレースホルダーが残っています: \${${{ inputs.env-var-name }}}"
+            echo "🛠️ ワークフローを停止します"
+            exit 1
+          else
+            echo "✅ 環境変数の置換が成功しました"
+          fi
+          
+          # JSONの構文チェック
+          if command -v jq >/dev/null 2>&1; then
+            echo "🔍 Validating JSON syntax..."
+            if jq empty .mcp.json 2>/dev/null; then
+              echo "✅ JSON syntax is valid"
+            else
+              echo "❌ JSON syntax error detected"
+              exit 1
+            fi
+          fi
+        else
+          echo "❌ .mcp.json not found"
+          exit 1
+        fi
+        
+    - name: Generate image with Claude Code Action
+      id: generate
+      uses: anthropics/claude-code-action@beta
+      with:
+        claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
+        mode: agent
+        mcp_config: .mcp.json
+        settings: |
+          {
+            "permissions": {
+              "allow": [
+                "mcp__${{ inputs.tool-name }}__imagen4_fast_result",
+                "mcp__${{ inputs.tool-name }}__imagen4_fast_status",
+                "mcp__${{ inputs.tool-name }}__imagen4_fast_submit",
+                "Bash",
+                "Write",
+                "Read",
+                "Edit"              
+                ]
+            }
+          }
+        direct_prompt: |
+          Generate a title image for the video and save it to the file system.
+          
+          Title: ${{ inputs.title }}
+          Folder: ${{ inputs.folder-name }}
+          Image Prompt: ${{ inputs.image-prompt }}
+          
+          Required actions:
+          1. Use mcp__${{ inputs.tool-name }}__imagen4_fast_submit to generate the image
+          2. Use mcp__${{ inputs.tool-name }}__imagen4_fast_status to check generation status  
+          3. Use mcp__${{ inputs.tool-name }}__imagen4_fast_result to get the download URL
+          4. Use Bash to download the image:
+             - Create directory: mkdir -p ${{ inputs.folder-name }}/${{ inputs.output-directory }}
+             - Get the image URL from step 3 result
+             - Download: curl -L -o "${{ inputs.folder-name }}/${{ inputs.output-directory }}/background.png" [IMAGE_URL]
+          5. Verify file exists: ls -la ${{ inputs.folder-name }}/${{ inputs.output-directory }}/
+          6. Set output: echo "image-generated=true" >> $GITHUB_OUTPUT
+          
+          IMPORTANT: Work in the current directory, not in /root/. All paths should be relative.
+          You have explicit permissions for Bash, Write, Read, LS, and Glob tools.
+        additional_permissions: |
+          contents: write
+        
+    - name: Check and set output
+      id: check-result
+      if: always()
+      shell: bash
+      run: |
+        # Check if any image file exists in the directory and set output
+        FOLDER_NAME="${{ inputs.folder-name }}"
+        OUTPUT_DIR="${{ inputs.output-directory }}"
+        if ls "$FOLDER_NAME/$OUTPUT_DIR/"*.png 2>/dev/null || ls "$FOLDER_NAME/$OUTPUT_DIR/"*.jpg 2>/dev/null || ls "$FOLDER_NAME/$OUTPUT_DIR/"*.jpeg 2>/dev/null; then
+          echo "✅ Title image found:"
+          ls -la "$FOLDER_NAME/$OUTPUT_DIR/"
+          echo "image-generated=true" >> $GITHUB_OUTPUT
+        else
+          echo "⚠️ Title image not found in $FOLDER_NAME/$OUTPUT_DIR/"
+          echo "📁 Directory contents:"
+          ls -la "$FOLDER_NAME/" 2>/dev/null || echo "Folder not found"
+          ls -la "$FOLDER_NAME/$OUTPUT_DIR/" 2>/dev/null || echo "Output directory not found"
+          echo "image-generated=false" >> $GITHUB_OUTPUT
+        fi
