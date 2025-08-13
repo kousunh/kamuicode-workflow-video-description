@@ -9,13 +9,19 @@
 
 動画にAIが生成したタイトルと説明文を追加し、タイトル背景画像と音楽も生成して統合するGitHub Actionsワークフローです。
 
+**🆕 新機能**: Claude Code Action または Gemini CLI Action を選択して、タイトル画像と音楽の生成が可能になりました。
+
 ## 主な機能
 
 - 🎬 **動画分析**: Google Gemini Vision APIを使用して動画内容を分析
 - 📝 **説明文生成**: 動画の重要なポイントに説明テキストを自動生成
 - 🎨 **タイトル生成**: 動画内容に基づいたタイトルを自動生成（カスタマイズも可能）
-- 🖼️ **タイトル背景画像生成**: KAMUI CODE（Imagen4）によるタイトル画面用の背景画像生成
-- 🎵 **背景音楽生成**: KAMUI CODE（Google Lyria）による動画全体の背景音楽生成
+- 🖼️ **タイトル背景画像生成**: 
+  - **Claude Code Action版**:  KAMUI CODE（Imagen4）による画像生成
+  - **Gemini CLI Action版**:  KAMUI CODE（Imagen4）による画像生成
+- 🎵 **背景音楽生成**: 
+  - **Claude Code Action版**: KAMUI CODE（Google Lyria）による音楽生成
+  - **Gemini CLI Action版**: KAMUI CODE（Google Lyria）による音楽生成
 
 ## 現状のワークフローの流れ
 
@@ -50,12 +56,27 @@ graph LR
 このリポジトリをクローン後：
 ```
 kamuicode-workflow-video-description/
-├── video-text-enhancer.yml    # ワークフローファイル
+├── CCA-video-text-enhancer.yml        # Claude Code Action版ワークフロー
+├── Gemini-video-text-enhancer.yml     # Gemini CLI Action版ワークフロー
+├── re-edit-video.yml                  # 再編集ワークフロー
 ├── scripts/
-│   ├── analyze_video.py      # 動画分析スクリプト
-│   └── verify_content.py     # コンテンツ検証スクリプト
+│   └── gemini_analyzer.py            # 汎用動画/画像分析スクリプト
+├── modules/
+│   ├── claude-code-image-generator/  # CCA画像生成モジュール
+│   ├── claude-code-music-generator/  # CCA音楽生成モジュール
+│   ├── gemini-cli-title-image-generator/  # Gemini画像生成モジュール
+│   ├── gemini-cli-music-generator/   # Gemini音楽生成モジュール
+│   ├── ffmpeg-add-music/            # 音楽追加モジュール
+│   ├── ffmpeg-text-overlay/         # テキストオーバーレイモジュール
+│   ├── ffmpeg-title-generator/      # タイトル動画生成モジュール
+│   ├── ffmpeg-video-concat/         # 動画結合モジュール
+│   └── workflow-summary-generator/   # サマリー生成モジュール
+├── settings/
+│   ├── ClaudeCodeAction/            # CCA用設定
+│   ├── ffmpeg-settings.yml          # FFmpeg設定
+│   └── 各種プロンプトファイル
 ├── videos/
-│   └── README.md             # 動画ディレクトリの説明
+│   └── README.md                    # 動画ディレクトリの説明
 ├── README.md
 ├── SETUP.md
 └── LICENSE
@@ -66,13 +87,35 @@ kamuicode-workflow-video-description/
 your-repository/
 ├── .github/
 │   └── workflows/
-│       └── video-text-enhancer.yml
+│       ├── CCA-video-text-enhancer.yml    # Claude Code Action版
+│       ├── Gemini-video-text-enhancer.yml # Gemini CLI Action版
+│       └── re-edit-video.yml              # 再編集用
 ├── scripts/
-│   ├── analyze_video.py
-│   └── verify_content.py
+│   └── gemini_analyzer.py
+├── modules/                              # 各種モジュール（上記参照）
+├── settings/                             # 設定ファイル
 └── videos/
     └── your-video.mp4
 ```
+
+## ワークフローの選択
+
+### Claude Code Action版 or Gemini CLI Action版
+
+本プロジェクトでは、2つのワークフローから選択できます：
+
+| 機能 | Claude Code Action版 | Gemini CLI Action版 |
+|------|-------|-------------|
+| 動画分析 | Gemini Vision API | Gemini Vision API |
+| タイトル画像生成 | KAMUI CODE (Imagen4)
+| 背景音楽生成 | KAMUI CODE (Google Lyria)
+| AIエージェント | Claude Code Action | Gemini CLI Action|
+| 必要な設定 | GitHub Secrets + MCP URL |
+| 利用制限 | Claudeの制限に準拠 | Geminiの制限に準拠 |
+
+### 選び方
+- **Claude Code Action版を選ぶ場合**: Claude Code Actionはサブスクリプションプランで設定できるため、プランを活用したい
+- **Gemini CLI Action版を選ぶ場合**: Gemini CLI経由でKAMUI CODEを利用したい
 
 ## 使用方法
 
@@ -88,8 +131,16 @@ your-repository/
    ```bash
    # .github/workflowsディレクトリを作成
    mkdir -p .github/workflows
-   # ワークフローファイルをコピー
-   cp video-text-enhancer.yml .github/workflows/
+   
+   # 使用したいワークフローをコピー
+   # Claude Code Action版を使用する場合：
+   cp CCA-video-text-enhancer.yml .github/workflows/
+   
+   # または、Gemini CLI Action版を使用する場合：
+   cp Gemini-video-text-enhancer.yml .github/workflows/
+   
+   # 再編集ワークフローも必要な場合：
+   cp re-edit-video.yml .github/workflows/
    ```
 
 3. **動画ファイルの追加**
@@ -103,7 +154,9 @@ your-repository/
 
 4. **ワークフローの実行**
    - GitHubリポジトリの「Actions」タブを開く
-   - 「Video Text Enhancer」ワークフローを選択
+   - 使用するワークフローを選択：
+     - 「CCA-Video Text Enhancer」（Claude Code Action版）
+     - 「Gemini-Video Text Enhancer」（Gemini CLI Action版）
    - 「Run workflow」をクリック
    - 必要に応じてパラメータを入力
 
@@ -227,6 +280,13 @@ graph LR
 - Actionsタブから手動で実行してください
 
 ### 画像・音楽が生成されない
+
+#### Claude Code Action版の場合：
+- Claude Code Actionの設定が正しいか確認してください
+- GitHub ActionsでのClaude APIの利用制限を確認してください
+- ワークフローログでエラーメッセージを確認してください
+
+#### Gemini CLI版の場合：
 - ワークフローの画像・音楽生成ジョブの詳細ログを確認してください
 - Gemini CLI Actionのレートリミットで止まっている可能性があります
 - GitHub Secretsの`T2I_KAMUI_IMAGEN4_FAST_URL`と`T2M_KAMUI_LYRIA_URL`が正しく設定されているか確認してください
