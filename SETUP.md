@@ -3,7 +3,7 @@
 ## 前提条件
 
 - GitHubアカウント
-- Google Cloud ProjectとGemini API有効化
+- Gemini API有効化
 - （オプション）GitHub Personal Access Token
 
 ## ステップ1: Google Gemini APIキーの取得
@@ -28,24 +28,30 @@ cd kamuicode-workflow-video-description
 kamuicode-workflow-video-description/
 ├── .github/
 │   └── workflows/
-│       ├── video-text-enhancer.yml    # メインワークフローファイル
-│       └── re-edit-video.yml          # 再編集ワークフローファイル
+│       ├── CCA-video-text-enhancer.yml    # Claude Code Action版ワークフロー
+│       ├── Gemini-video-text-enhancer.yml # Gemini CLI Action版ワークフロー
+│       └── re-edit-video.yml              # 再編集ワークフローファイル
 ├── scripts/
 │   └── gemini_analyzer.py    # 汎用動画/画像分析スクリプト
 ├── modules/
-│   ├── ffmpeg-add-music/     # 音楽追加モジュール
-│   ├── ffmpeg-text-overlay/  # テキストオーバーレイモジュール
-│   ├── ffmpeg-title-generator/  # タイトル動画生成モジュール
-│   ├── ffmpeg-video-concat/  # 動画結合モジュール
-│   ├── gemini-cli-music-generator/  # AI音楽生成モジュール
-│   └── gemini-cli-title-image-generator/  # AI画像生成モジュール
-├── settings/                  # 各種設定ファイル
-│   ├── ffmpeg-settings-readme.md  # FFmpeg設定説明
-│   ├── video-analysis-prompts.md  # 動画分析プロンプト
-│   ├── image-generation-prompt.md # 画像生成プロンプト
-│   └── music-generation-prompt.md # 音楽生成プロンプト
+│   ├── claude-code-image-generator/       # CCA画像生成モジュール
+│   ├── claude-code-music-generator/       # CCA音楽生成モジュール
+│   ├── gemini-cli-title-image-generator/  # Gemini画像生成モジュール
+│   ├── gemini-cli-music-generator/        # Gemini音楽生成モジュール
+│   ├── ffmpeg-add-music/                  # 音楽追加モジュール
+│   ├── ffmpeg-text-overlay/               # テキストオーバーレイモジュール
+│   ├── ffmpeg-title-generator/            # タイトル動画生成モジュール
+│   ├── ffmpeg-video-concat/               # 動画結合モジュール
+│   └── workflow-summary-generator/        # サマリー生成モジュール
+├── settings/                               # 各種設定ファイル
+│   ├── ClaudeCodeAction/                  # CCA用設定
+│   ├── ffmpeg-settings.yml                # FFmpeg設定
+│   ├── ffmpeg-settings-readme.md          # FFmpeg設定説明
+│   ├── video-analysis-prompts.md          # 動画分析プロンプト
+│   ├── image-generation-prompt.md         # 画像生成プロンプト
+│   └── music-generation-prompt.md         # 音楽生成プロンプト
 ├── videos/
-│   └── README.md             # 動画ディレクトリの説明
+│   └── README.md                           # 動画ディレクトリの説明
 ├── README.md
 ├── SETUP.md
 └── LICENSE
@@ -56,8 +62,16 @@ kamuicode-workflow-video-description/
 
 ```bash
 # ワークフローファイルがすでに.github/workflowsにある場合はコピー不要
-# video-text-enhancer.yml: メインの動画編集ワークフロー
-# re-edit-video.yml: 既存動画の再編集ワークフロー
+# 使用したいワークフローを選択してコピー：
+
+# Claude Code Action版を使用する場合：
+cp CCA-video-text-enhancer.yml .github/workflows/
+
+# または、Gemini CLI Action版を使用する場合：
+cp Gemini-video-text-enhancer.yml .github/workflows/
+
+# 再編集ワークフロー（共通）
+cp re-edit-video.yml .github/workflows/
 
 # サンプル動画を配置（任意）
 cp your-video.mp4 videos/
@@ -65,61 +79,95 @@ cp your-video.mp4 videos/
 
 ## ⚠️ 重要な設定事項
 
-### kamuicode MCP設定
+### ワークフロー別の設定要件
 
-**重要**: `.gemini/settings.json`ファイルは**手動で作成する必要はありません**。GitHub Actionsワークフロー実行時に、GitHub Secretsの値を使用して自動的に生成されます。
+#### Claude Code Action版の場合
+- Claude Code Actionのサブスクリプションプランによる設定、またはClaude APIが必要です
+- KAMUI CODEへのアクセスはClaude Code Action経由で行われます
+- `.mcp.json`ファイルは`settings/ClaudeCodeAction/`に配置済み
+- GitHub Actionsワークフロー実行時に、GitHub Secretsの値を使用してMCP URLが自動的に展開されます
 
-**必須設定**:
-- GitHubリポジトリのSecretsに以下の値を設定するだけで動作します：
-  - `T2I_KAMUI_IMAGEN4_FAST_URL`: Imagen4 FastのMCPサーバーURL
-  - `T2M_KAMUI_LYRIA_URL`: Google LyriaのMCPサーバーURL
-  - `GEMINI_API_KEY`: Gemini APIキー
+##### Claude Code Actionの設定方法（サブスクリプションプラン利用）
+
+**OAuthトークンの自動セットアップ（推奨）**
+
+1. **Claude Codeでセットアップコマンドを実行**
+   ```bash
+   /install-github-app
+   ```
+
+2. **自動的に実行される処理**
+   - Claude Code ActionがあなたのGitHubリポジトリにプルリクエストを作成
+   - プルリクエストには以下が含まれます：
+     - 必要なGitHub Secretsの設定
+     - `claude.yml`ワークフローファイル（Issue/PR用）
+
+3. **プルリクエストをマージ**
+   - 内容を確認してマージすると、以下が自動設定されます：
+     - `CLAUDE_CODE_OAUTH_TOKEN`: GitHub Secretsに自動登録
+     - `claude.yml`: Issue/PR用のワークフロー
+   - これでClaude Code Actionが使用可能になります
+
+4. **設定完了の確認**
+   - GitHub Secretsに`CLAUDE_CODE_OAUTH_TOKEN`が追加されていることを確認
+   - このトークンはCCA-video-text-enhancer.ymlで使用されます
+
+**注意事項**
+- `/install-github-app`で作成される`claude.yml`は、Issue/PRからClaude Code Actionを呼び出す際に使用
+- `CCA-video-text-enhancer.yml`の実行には直接関係ありませんが、削除する必要はありません
+- リポジトリの管理者権限が必要です
+
+#### Gemini CLI Action版の場合
+- `.gemini/settings.json`ファイルは**手動で作成する必要はありません**
+- GitHub Actionsワークフロー実行時に、GitHub Secretsの値を使用して自動的に生成されます
+
+### 必須設定
+
+#### 両ワークフロー共通
+- `GEMINI_API_KEY`: Gemini APIキー（動画分析用）
+- `PAT_TOKEN`: GitHub Personal Access Token（PR自動作成用、オプション）
+
+#### Claude Code Action版の追加設定
+
+**サブスクリプションプランを使用する場合：**
+- `CLAUDE_CODE_OAUTH_TOKEN`: `/install-github-app`コマンドで自動設定されるOAuthトークン
+  
+  ※手動でトークンを生成する場合は`claude setup-token`コマンドを使用
+
+**APIキーを使用する場合：**
+- `ANTHROPIC_API_KEY`: Anthropic APIキー
+
+**KAMUI CODE接続用：**
+- `T2I_KAMUI_IMAGEN4_FAST_URL`: Imagen4 FastのKAMUI CODEサーバーURL
+- `T2M_KAMUI_LYRIA_URL`: Google LyriaのKAMUI CODEサーバーURL
+
+※これらのURLはセキュリティ保護のためGitHub Secretsで管理し、`settings/ClaudeCodeAction/.mcp.json`内では環境変数として参照されます
+
+#### Gemini CLI Action版の追加設定
+- `T2I_KAMUI_IMAGEN4_FAST_URL`: Imagen4 FastのMCPサーバーURL
+- `T2M_KAMUI_LYRIA_URL`: Google LyriaのMCPサーバーURL
 
 **セキュリティ上の利点**:
-- MCPサーバーのURLは機密情報としてGitHub Secretsで安全に管理されます
+- KAMUI CODEのMCPサーバーURLは機密情報としてGitHub Secretsで安全に管理されます
 - リポジトリにコミットされることがないため、公開リポジトリでも安全に使用できます
-- ワークフロー実行時にのみ、一時的に`.gemini/settings.json`が作成されます
+- Claude Code Action版: `settings/ClaudeCodeAction/.mcp.json`内で環境変数として参照
+- Gemini CLI Action版: ワークフロー実行時に`.gemini/settings.json`を動的生成
 
-**自動生成される設定ファイルの内容**:
-```json
-{
-  "mcpServers": {
-    "t2i-kamui-imagen4-fast": {
-      "httpUrl": "<T2I_KAMUI_IMAGEN4_FAST_URLの値>",
-      "timeout": 300000
-    },
-    "t2m-kamui-lyria": {
-      "httpUrl": "<T2M_KAMUI_LYRIA_URLの値>",
-      "timeout": 300000
-    }
-  },
-  "coreTools": [
-    "ReadFileTool",
-    "WriteFileTool", 
-    "EditFileTool",
-    "ShellTool"
-  ]
-}
-```
-※ `<T2I_KAMUI_IMAGEN4_FAST_URLの値>`と`<T2M_KAMUI_LYRIA_URLの値>`には、GitHub Secretsに設定した実際のURLが挿入されます
+### AI生成ツールについて
 
-### MCPツールの限定設定
+両ワークフローともKAMUI CODEのツールを使用します：
+- **画像生成**: Imagen4 Fast
+- **音楽生成**: Google Lyria
 
-**重要**: 全てのMCPツールを設定すると、gemini特有の問題で利用できないツールがある場合にエラーになります。（Gemini CLI actionがSettings.jsonを読み込む際に、MCPツールの有効性を全部確認しているようです。）
-
-このワークフローでは以下のツールのみを使用：
-- Imagen4 Fast（画像生成）
-- Google Lyria（音楽生成）
-
-### 権限設定
-
-ワークフローファイルには以下の権限設定が必要です：
-
-```yaml
-permissions:
-  contents: write
-  pull-requests: write
-```
+アクセス方法の違い：
+- **Claude Code Action版**: 
+  - Claude Code Action経由でKAMUI CODEにアクセス
+  - 設定ファイル: `settings/ClaudeCodeAction/.mcp.json`
+  - URLはGitHub Secretsで管理（セキュリティ保護）
+- **Gemini CLI Action版**: 
+  - Gemini CLI経由でKAMUI CODEにアクセス
+  - 設定ファイル: `.gemini/settings.json`（ワークフロー実行時に自動生成）
+  - URLはGitHub Secretsで管理（セキュリティ保護）
 
 ## ステップ3: GitHubシークレットの設定
 
@@ -127,17 +175,40 @@ permissions:
 2. 左メニューから「Secrets and variables」→「Actions」を選択
 3. 「New repository secret」をクリック
 
-### 必須シークレット
+### 必須シークレット（両ワークフロー共通）
 - **Name**: `GEMINI_API_KEY`
 - **Secret**: 取得したGemini APIキー
+
+### Claude Code Action版のみ必要
+
+#### サブスクリプションプランの場合：
+- **Name**: `CLAUDE_CODE_OAUTH_TOKEN`
+- **Secret**: `/install-github-app`コマンドで自動設定、または`claude setup-token`で生成
+
+#### APIキーの場合：
+- **Name**: `ANTHROPIC_API_KEY`
+- **Secret**: Anthropicから取得したAPIキー
+こちらを利用する場合、ワークフローをAPIキーを使うように編集しなければなりません。現在は上記のサブスクリプションプランのOAuthトークンを使うようになっています。
+
+#### KAMUI CODE接続用：
 - **Name**: `T2I_KAMUI_IMAGEN4_FAST_URL`
-- **Secret**: kamuicode MCPサーバーのImagen4 FastエンドポイントURL（上記settings.jsonの`t2i-kamui-imagen4-fast`に設定するURL）
+- **Secret**: KAMUI CODE MCPサーバーのImagen4 FastエンドポイントURL
 - **Name**: `T2M_KAMUI_LYRIA_URL`
-- **Secret**: kamuicode MCPサーバーのGoogle LyriaエンドポイントURL（上記settings.jsonの`t2m-kamui-lyria`に設定するURL）
+- **Secret**: KAMUI CODE MCPサーバーのGoogle LyriaエンドポイントURL
+
+
+- **Name**: `T2I_KAMUI_IMAGEN4_FAST_URL`
+- **Secret**: KAMUI CODE MCPサーバーのImagen4 FastエンドポイントURL
+- **Name**: `T2M_KAMUI_LYRIA_URL`
+- **Secret**: KAMUI CODE MCPサーバーのGoogle LyriaエンドポイントURL
 
 ### オプションシークレット（PR自動作成用）
 - **Name**: `PAT_TOKEN`
 - **Secret**: GitHub Personal Access Token
+
+⚠️ **セキュリティ上の注意**: 
+- APIキーやトークンを直接ワークフローファイルに記載しないでください
+- 必ずGitHub Secretsを使用してください
 
 #### Personal Access Tokenの作成方法：
 1. GitHub → Settings → Developer settings → Personal access tokens
@@ -165,7 +236,9 @@ git push origin main
 
 ### 手動実行
 1. GitHubリポジトリの「Actions」タブを開く
-2. 左サイドバーから「Video Text Enhancer」を選択
+2. 左サイドバーから使用するワークフローを選択：
+   - 「CCA-Video Text Enhancer」（Claude Code Action版）
+   - 「Gemini-Video Text Enhancer」（Gemini CLI Action版）
 3. 「Run workflow」ボタンをクリック
 4. パラメータを入力：
    - **video_path**: 
@@ -200,6 +273,15 @@ A: `videos/`ディレクトリに動画ファイルが存在することを確�
 A: APIキーが正しく設定されているか、API制限に達していないか確認してください。
 
 ### Q: AI画像/音楽生成がエラーになる
+
+#### Claude Code Action版の場合
+A: 以下を確認してください：
+- `CLAUDE_CODE_OAUTH_TOKEN`が正しく設定されているか
+- Claude Code Actionの設定ファイル
+- KAMUI CODEのMCP URLの設定
+- API制限とレートリミット
+
+#### Gemini CLI Action版の場合
 A: GitHub Secretsに`T2I_KAMUI_IMAGEN4_FAST_URL`と`T2M_KAMUI_LYRIA_URL`が正しく設定されているか確認してください。
 
 ### Q: 高速に処理したい
@@ -240,6 +322,15 @@ A: AI生成機能を無効にしてください（`generate_title_image`と`gene
 ## トラブルシューティング
 
 ### 画像・音楽が生成されない
+
+#### Claude Code Action版
+- `CLAUDE_CODE_OAUTH_TOKEN`の設定を確認（`claude setup-token`で再生成）
+- Claude Code Actionの設定ファイルが正しく配置されているか確認
+- KAMUI CODEのMCP URLがGitHub Secretsに正しく設定されているか確認
+- ワークフローの画像・音楽生成ジョブの詳細ログを確認
+- Claude APIのレートリミットで止まっている可能性があります
+
+#### Gemini CLI Action版
 - ワークフローの画像・音楽生成ジョブの詳細ログを確認してください
 - Gemini CLI Actionのレートリミットで止まっている可能性があります
 - GitHub Secretsの`T2I_KAMUI_IMAGEN4_FAST_URL`と`T2M_KAMUI_LYRIA_URL`が正しく設定されているか確認してください
